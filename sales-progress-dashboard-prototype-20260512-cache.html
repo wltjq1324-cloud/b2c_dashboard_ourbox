@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>아워박스 세일즈 대시보드 캐시 버전</title>
+  <style>
+    body{margin:0;background:#f4f6f9;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}
+    .boot{min-height:100vh;display:grid;place-items:center}
+    .card{background:#fff;border:1px solid #dde3ea;border-radius:12px;padding:22px 26px;box-shadow:0 8px 24px rgba(16,32,51,.06);text-align:center}
+    .title{font-weight:900;margin-bottom:8px}.sub{font-size:13px;color:#687386}
+  </style>
+</head>
+<body>
+<div class="boot"><div class="card"><div class="title">캐시 대시보드 로딩 중</div><div class="sub">요약 캐시 응답으로 새 화면을 준비합니다.</div></div></div>
+<script>
+(async function(){
+  function replaceOrFail(source, pattern, replacement, label){
+    var next = source.replace(pattern, replacement);
+    if(next === source) throw new Error('패치 실패: ' + label);
+    return next;
+  }
+
+  var response = await fetch('sales-progress-dashboard-prototype-20260512.html?v=' + Date.now(), { cache: 'no-store' });
+  if(!response.ok) throw new Error('원본 HTML 로드 실패: HTTP ' + response.status);
+
+  var html = await response.text();
+
+  html = replaceOrFail(html, /<title>[\s\S]*?<\/title>/, '<title>아워박스 세일즈 대시보드 캐시 버전</title>', 'title');
+
+  html = replaceOrFail(
+    html,
+    /let ALL=\[\], charts=\{\}, activeIssue='channelUnmapped', currentPage='overview';/,
+    "let RAW_ROWS=[], ALL=[], PRODUCT_CACHE=[], QUALITY_ROWS=[], DATA_MODE='orders', charts={}, activeIssue='channelUnmapped', currentPage='overview';",
+    'state'
+  );
+
+  html = replaceOrFail(
+    html,
+    /function orderCount\(rows\)\{return new Set\(rows\.map\(r=>r\.id\)\)\.size\}/,
+    "function orderCount(rows){return rows.some(r=>r.orders!==undefined)?sum(rows,'orders'):new Set(rows.map(r=>r.id).filter(Boolean)).size}\n" +
+    "function cleanCacheRow(r){return {sheetRow:NUM(r.sheetRow),id:String(r.id||r.orderId||''),item:r.item||r.itemName||'',qty:NUM(r.qty||r.quantity),revenue:NUM(r.revenue||r.sales),ship:NUM(r.ship),shop:r.shop||r.shopName||'',date:parseDate(r.date||r.orderDate),channel:r.channel||r.channelGroup||'미매핑',product:r.product||r.stdProduct||r.item||r.itemName||'',category:r.category||'미매핑',settlement:NUM(r.settlement),cost:NUM(r.cost),shipCost:NUM(r.shipCost),margin:NUM(r.margin),manager:r.manager||'미지정',orders:NUM(r.orders||r.orderCount||r.count)}}\n" +
+    "function buildBaseCache(rows){let m=new Map(); rows.forEach(r=>{let key=[r.date,r.channel,r.category,r.manager].join('|||'); if(!m.has(key))m.set(key,{date:r.date,channel:r.channel,category:r.category,manager:r.manager,qty:0,revenue:0,settlement:0,cost:0,shipCost:0,margin:0,orders:0,_ids:new Set()}); let o=m.get(key); o.qty+=r.qty||0; o.revenue+=r.revenue||0; o.settlement+=r.settlement||0; o.cost+=r.cost||0; o.shipCost+=r.shipCost||0; o.margin+=r.margin||0; if(r.id)o._ids.add(r.id)}); return [...m.values()].map(o=>{o.orders=o._ids.size; delete o._ids; return o})}\n" +
+    "function normalizeApiResponse(json){let cache=json&& !Array.isArray(json) ? (json.dashboardCache||json.cache||json.summary) : null; if(cache&&Array.isArray(cache.baseRows)){RAW_ROWS=[]; ALL=cache.baseRows.map(cleanCacheRow).filter(r=>r.date); PRODUCT_CACHE=(cache.productRows||[]).map(cleanCacheRow).filter(r=>r.date); QUALITY_ROWS=(cache.qualityRows||[]).map(cleanCacheRow).filter(r=>r.date); DATA_MODE='server-cache'; return} let src=Array.isArray(json)?json:(json.orders||json.data||json.rows||[]); RAW_ROWS=src.map(clean).filter(r=>r.id&&r.date); ALL=buildBaseCache(RAW_ROWS); PRODUCT_CACHE=[]; QUALITY_ROWS=[]; DATA_MODE='client-cache'}",
+    'cache helpers'
+  );
+
+  html = replaceOrFail(
+    html,
+    /function filtered\(\)\{let ch=\$\('channelFilter'\)\.value,cat=\$\('categoryFilter'\)\.value,mgr=\$\('managerFilter'\)\.value; return ALL\.filter\(r=>inDateRange\(r\)&&\(ch==='ALL'\|\|r\.channel===ch\)&&\(cat==='ALL'\|\|r\.category===cat\)&&\(mgr==='ALL'\|\|r\.manager===mgr\)\)\}/,
+    "function filtered(){let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return ALL.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
+    "function rawFiltered(){let base=QUALITY_ROWS.length?QUALITY_ROWS:RAW_ROWS; if(!base.length)return []; let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
+    "function productRows(){let base=PRODUCT_CACHE.length?PRODUCT_CACHE:RAW_ROWS; if(!base.length)return filtered(); let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||!r.channel||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||!r.manager||r.manager===mgr))}",
+    'filters'
+  );
+
+  html = replaceOrFail(
+    html,
+    /let res=await fetch\(API_URL\+'\?t='\+Date\.now\(\),\{cache:'no-store',signal:controller\.signal\}\);/,
+    "let joiner=API_URL.indexOf('?')>=0?'&':'?';\n    let res=await fetch(API_URL+joiner+'mode=cache&t='+Date.now(),{cache:'no-store',signal:controller.signal});",
+    'cache fetch'
+  );
+
+  html = replaceOrFail(
+    html,
+    /let json=await res\.json\(\), src=Array\.isArray\(json\)\?json:\(json\.orders\|\|json\.data\|\|json\.rows\|\|\[\]\);\s*ALL=src\.map\(clean\)\.filter\(r=>r\.id&&r\.date\);/,
+    'let json=await res.json();\n    normalizeApiResponse(json);',
+    'normalize response'
+  );
+
+  html = replaceOrFail(
+    html,
+    /initControls\(\); setStatus\('','실시간 연결'\); \$\('sideStatus'\)\.textContent='Google Sheets 연결 완료'; \$\('sideMeta'\)\.textContent=`\$\{ALL\.length\.toLocaleString\('ko-KR'\)\} rows`; renderAll\(\);/,
+    "initControls(); setStatus('',DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더'); $('sideStatus').textContent='Google Sheets 연결 완료'; $('sideMeta').textContent=DATA_MODE==='server-cache'?`${ALL.length.toLocaleString('ko-KR')} summary rows`:`${RAW_ROWS.length.toLocaleString('ko-KR')} raw → ${ALL.length.toLocaleString('ko-KR')} summary`; renderAll();",
+    'status'
+  );
+
+  html = replaceOrFail(
+    html,
+    /function renderAll\(\)\{if\(!ALL\.length\)return; refreshFilterOptions\(\); let rows=filtered\(\), target=NUM\(\$\('targetInput'\)\.value\); \$\('rangePill'\)\.textContent=`\$\{\$\('dateFrom'\)\.value\} ~ \$\{\$\('dateTo'\)\.value\}`; renderKpis\(rows,target\); renderCumulative\(rows,target\); renderChannelProgress\(rows,target\); renderDaily\(rows\); renderMoM\(rows\); renderChannelDaily\(rows\); renderProfitStructure\(rows\); renderProduct\(rows\); renderChannelTable\(rows\); renderQuality\(rows\); renderManagerPage\(rows\)\}/,
+    "function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderQuality(detailRows.length?detailRows:rows); renderManagerPage(rows)}",
+    'renderAll'
+  );
+
+  document.open();
+  document.write(html);
+  document.close();
+})().catch(function(err){
+  document.body.innerHTML = '<div class="boot"><div class="card"><div class="title">캐시 대시보드 로딩 실패</div><div class="sub">' + String(err.message || err).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]}) + '</div></div></div>';
+});
+</script>
+</body>
+</html>
