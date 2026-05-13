@@ -57,6 +57,25 @@
 
   html = replaceOrFail(
     html,
+    /function computedTarget\(\)\{let pr=prevRange\(\), prev=sum\(sameFilterRows\(pr\.from,pr\.to\),'revenue'\), cur=sum\(filtered\(\),'revenue'\), base=prev\?prev\*1\.08:cur\*1\.2; return Math\.max\(0,Math\.round\(base\/1000000\)\*1000000\)\}/,
+    "const QUARTER_MONTHLY_TARGETS={1:290407733,2:348489280,3:418187136,4:501824563}\n" +
+    "function quarterOfDate(s){return Math.floor(asDate(s).getMonth()/3)+1}\n" +
+    "function monthDays(s){let d=asDate(s); return new Date(d.getFullYear(),d.getMonth()+1,0).getDate()}\n" +
+    "function roundMillion(n){return Math.max(0,Math.round((n||0)/1000000)*1000000)}\n" +
+    "function quarterPeriodTarget(){let dates=dateList($('dateFrom').value,$('dateTo').value); let total=dates.reduce((a,d)=>a+(QUARTER_MONTHLY_TARGETS[quarterOfDate(d)]||0)/monthDays(d),0); return roundMillion(total)}\n" +
+    "function computedTarget(){return quarterPeriodTarget()}",
+    'quarter target'
+  );
+
+  html = replaceOrFail(
+    html,
+    /function applyTarget\(\)\{let saved=localStorage\.getItem\(targetKey\(\)\); \$\('targetInput'\)\.value=saved===null\?computedTarget\(\):NUM\(saved\); \$\('targetSource'\)\.textContent=saved===null\?'전월 동기간 기준 자동 목표':'브라우저 저장 목표'\}/,
+    "function applyTarget(){let saved=localStorage.getItem(targetKey()); $('targetInput').value=saved===null?computedTarget():NUM(saved); $('targetSource').textContent=saved===null?'분기 목표 기준 자동 목표':'브라우저 저장 목표'}",
+    'target source label'
+  );
+
+  html = replaceOrFail(
+    html,
     /function filtered\(\)\{let ch=\$\('channelFilter'\)\.value,cat=\$\('categoryFilter'\)\.value,mgr=\$\('managerFilter'\)\.value; return ALL\.filter\(r=>inDateRange\(r\)&&\(ch==='ALL'\|\|r\.channel===ch\)&&\(cat==='ALL'\|\|r\.category===cat\)&&\(mgr==='ALL'\|\|r\.manager===mgr\)\)\}/,
     "function filtered(){let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return ALL.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
     "function rawFiltered(){let base=QUALITY_ROWS.length?QUALITY_ROWS:RAW_ROWS; if(!base.length)return []; let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
