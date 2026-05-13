@@ -47,11 +47,28 @@
 
   html = replaceOrFail(
     html,
+    /function daysBetween\(a,b\)\{return Math\.max\(0,Math\.round\(\(asDate\(b\)-asDate\(a\)\)\/86400000\)\+1\)\}\s*function dateList\(a,b\)\{let out=\[\], n=daysBetween\(a,b\); for\(let i=0;i<n;i\+\+\)out\.push\(addDays\(a,i\)\); return out\}/,
+    "function dashboardDateOk(s){if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(s||'')))return false; let y=Number(String(s).slice(0,4)); return y>=2020&&y<=2035&&!isNaN(asDate(s).getTime())}\n" +
+    "function daysBetween(a,b){if(!dashboardDateOk(a)||!dashboardDateOk(b))return 0; return Math.max(0,Math.min(370,Math.round((asDate(b)-asDate(a))/86400000)+1))}\n" +
+    "function dateList(a,b){let out=[], n=daysBetween(a,b); for(let i=0;i<n;i++)out.push(addDays(a,i)); return out}\n" +
+    "let dateInputTimer=null",
+    'date helpers'
+  );
+
+  html = replaceOrFail(
+    html,
     /function filtered\(\)\{let ch=\$\('channelFilter'\)\.value,cat=\$\('categoryFilter'\)\.value,mgr=\$\('managerFilter'\)\.value; return ALL\.filter\(r=>inDateRange\(r\)&&\(ch==='ALL'\|\|r\.channel===ch\)&&\(cat==='ALL'\|\|r\.category===cat\)&&\(mgr==='ALL'\|\|r\.manager===mgr\)\)\}/,
     "function filtered(){let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return ALL.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
     "function rawFiltered(){let base=QUALITY_ROWS.length?QUALITY_ROWS:RAW_ROWS; if(!base.length)return []; let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
     "function productRows(){let base=PRODUCT_CACHE.length?PRODUCT_CACHE:RAW_ROWS; if(!base.length)return filtered(); let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||!r.channel||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||!r.manager||r.manager===mgr))}",
     'filters'
+  );
+
+  html = replaceOrFail(
+    html,
+    /function handleDateChange\(\)\{if\(\$\('dateFrom'\)\.value>\$\('dateTo'\)\.value\)\{let t=\$\('dateFrom'\)\.value; \$\('dateFrom'\)\.value=\$\('dateTo'\)\.value; \$\('dateTo'\)\.value=t\} refreshFilterOptions\(\); applyTarget\(\); renderAll\(\)\}/,
+    "function handleDateChange(){clearTimeout(dateInputTimer); dateInputTimer=setTimeout(()=>{let from=$('dateFrom').value,to=$('dateTo').value; if(!dashboardDateOk(from)||!dashboardDateOk(to))return; if(from>to){let active=document.activeElement&&document.activeElement.id; if(active==='dateFrom')$('dateTo').value=from; else $('dateFrom').value=to} refreshFilterOptions(); applyTarget(); renderAll()},250)}",
+    'date change guard'
   );
 
   html = replaceOrFail(
