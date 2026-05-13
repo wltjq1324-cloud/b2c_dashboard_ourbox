@@ -20,30 +20,13 @@
     if(next === source) throw new Error('패치 실패: ' + label);
     return next;
   }
-  function replaceFunction(source, name, replacement){
-    var start = source.indexOf('function ' + name + '(');
-    if(start < 0) throw new Error('patch failed: function ' + name);
-    var brace = source.indexOf('{', start);
-    var depth = 0;
-    for(var i = brace; i < source.length; i++){
-      if(source[i] === '{') depth++;
-      if(source[i] === '}') depth--;
-      if(depth === 0) return source.slice(0, start) + replacement + source.slice(i + 1);
-    }
-    throw new Error('patch failed: function ' + name + ' end');
-  }
 
   var response = await fetch('sales-progress-dashboard-prototype-20260512.html?v=' + Date.now(), { cache: 'no-store' });
   if(!response.ok) throw new Error('원본 HTML 로드 실패: HTTP ' + response.status);
 
   var html = await response.text();
 
-  html = replaceOrFail(
-    html,
-    /<title>[\s\S]*?<\/title>/,
-    '<title>아워박스 세일즈 대시보드 캐시 버전</title>',
-    'title'
-  );
+  html = replaceOrFail(html, /<title>[\s\S]*?<\/title>/, '<title>아워박스 세일즈 대시보드 캐시 버전</title>', 'title');
 
   html = replaceOrFail(
     html,
@@ -54,67 +37,12 @@
 
   html = replaceOrFail(
     html,
-    /step="1000000"/,
-    'step="100000"',
-    'target step'
-  );
-
-  html = replaceOrFail(
-    html,
     /function orderCount\(rows\)\{return new Set\(rows\.map\(r=>r\.id\)\)\.size\}/,
     "function orderCount(rows){return rows.some(r=>r.orders!==undefined)?sum(rows,'orders'):new Set(rows.map(r=>r.id).filter(Boolean)).size}\n" +
-    "const SALES_2025_MONTHLY={1:238637371,2:149753221,3:213941981,4:150920984,5:260814388,6:140060161,7:182631389,8:205383873,9:303100000,10:268800000,11:295090000,12:345090000};\n" +
-    "const QUARTER_MONTHLY_TARGET={1:290407733,2:348489280,3:418187136,4:501824563};\n" +
-    "function daysInMonthParts(y,m){return new Date(y,m,0).getDate()}\n" +
-    "function quarterOfMonth(m){return Math.floor((m-1)/3)+1}\n" +
-    "function round100k(n){return Math.max(0,Math.round((n||0)/100000)*100000)}\n" +
-    "function fixed2025RevenueForRange(a,b){let total=0; dateList(a,b).forEach(d=>{let m=Number(d.slice(5,7)); total+=(SALES_2025_MONTHLY[m]||0)/daysInMonthParts(2025,m)}); return Math.round(total)}\n" +
-    "function yoyDailyValue(d){let m=Number(String(d||'').slice(5,7)); return Math.round((SALES_2025_MONTHLY[m]||0)/daysInMonthParts(2025,m))}\n" +
-    "function fixedTargetForRange(a,b){let total=0; dateList(a,b).forEach(d=>{let m=Number(d.slice(5,7)), q=quarterOfMonth(m); total+=(QUARTER_MONTHLY_TARGET[q]||0)/daysInMonthParts(Number(d.slice(0,4)),m)}); return round100k(total)}\n" +
     "function cleanCacheRow(r){return {sheetRow:NUM(r.sheetRow),id:String(r.id||r.orderId||''),item:r.item||r.itemName||'',qty:NUM(r.qty||r.quantity),revenue:NUM(r.revenue||r.sales),ship:NUM(r.ship),shop:r.shop||r.shopName||'',date:parseDate(r.date||r.orderDate),channel:r.channel||r.channelGroup||'미매핑',product:r.product||r.stdProduct||r.item||r.itemName||'',category:r.category||'미매핑',settlement:NUM(r.settlement),cost:NUM(r.cost),shipCost:NUM(r.shipCost),margin:NUM(r.margin),manager:r.manager||'미지정',orders:NUM(r.orders||r.orderCount||r.count)}}\n" +
     "function buildBaseCache(rows){let m=new Map(); rows.forEach(r=>{let key=[r.date,r.channel,r.category,r.manager].join('|||'); if(!m.has(key))m.set(key,{date:r.date,channel:r.channel,category:r.category,manager:r.manager,qty:0,revenue:0,settlement:0,cost:0,shipCost:0,margin:0,orders:0,_ids:new Set()}); let o=m.get(key); o.qty+=r.qty||0; o.revenue+=r.revenue||0; o.settlement+=r.settlement||0; o.cost+=r.cost||0; o.shipCost+=r.shipCost||0; o.margin+=r.margin||0; if(r.id)o._ids.add(r.id)}); return [...m.values()].map(o=>{o.orders=o._ids.size; delete o._ids; return o})}\n" +
     "function normalizeApiResponse(json){let cache=json&& !Array.isArray(json) ? (json.dashboardCache||json.cache||json.summary) : null; if(cache&&Array.isArray(cache.baseRows)){RAW_ROWS=[]; ALL=cache.baseRows.map(cleanCacheRow).filter(r=>r.date); PRODUCT_CACHE=(cache.productRows||[]).map(cleanCacheRow).filter(r=>r.date); QUALITY_ROWS=(cache.qualityRows||[]).map(cleanCacheRow).filter(r=>r.date); DATA_MODE='server-cache'; return} let src=Array.isArray(json)?json:(json.orders||json.data||json.rows||[]); RAW_ROWS=src.map(clean).filter(r=>r.id&&r.date); ALL=buildBaseCache(RAW_ROWS); PRODUCT_CACHE=[]; QUALITY_ROWS=[]; DATA_MODE='client-cache'}",
     'cache helpers'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function targetKey\(\)\{return 'ourboxTargetRange:'\+rangeKey\(\)\}/,
-    "function targetKey(){return 'ourboxTargetRangeV2:'+rangeKey()}",
-    'target key'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function daysBetween\(a,b\)\{return Math\.max\(0,Math\.round\(\(asDate\(b\)-asDate\(a\)\)\/86400000\)\+1\)\}\s*function dateList\(a,b\)\{let out=\[\], n=daysBetween\(a,b\); for\(let i=0;i<n;i\+\+\)out\.push\(addDays\(a,i\)\); return out\}/,
-    "function validDateValue(s){return /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s||''))&&!isNaN(asDate(s).getTime())}\n" +
-    "function daysBetween(a,b){if(!validDateValue(a)||!validDateValue(b))return 0; return Math.max(0,Math.round((asDate(b)-asDate(a))/86400000)+1)}\n" +
-    "function dateList(a,b){let out=[], n=daysBetween(a,b); if(!Number.isFinite(n)||n<=0)return out; n=Math.min(n,370); for(let i=0;i<n;i++)out.push(addDays(a,i)); return out}\n" +
-    "function dataBounds(){let ds=ALL.map(r=>r.date).filter(validDateValue).sort(); return {min:ds[0]||'2026-01-01',max:ds.at(-1)||formatDate(new Date())}}\n" +
-    "function clampDateInput(id,b){let el=$(id), v=el.value; if(!validDateValue(v))return false; if(v<b.min)el.value=b.min; if(v>b.max)el.value=b.max; return true}\n" +
-    "let dateRenderTimer=null",
-    'safe date helpers'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function computedTarget\(\)\{let pr=prevRange\(\), prev=sum\(sameFilterRows\(pr\.from,pr\.to\),'revenue'\), cur=sum\(filtered\(\),'revenue'\), base=prev\?prev\*1\.08:cur\*1\.2; return Math\.max\(0,Math\.round\(base\/1000000\)\*1000000\)\}/,
-    "function computedTarget(){return fixedTargetForRange($('dateFrom').value,$('dateTo').value)}",
-    'computed target'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function applyTarget\(\)\{let saved=localStorage\.getItem\(targetKey\(\)\); \$\('targetInput'\)\.value=saved===null\?computedTarget\(\):NUM\(saved\); \$\('targetSource'\)\.textContent=saved===null\?'전월 동기간 기준 자동 목표':'브라우저 저장 목표'\}/,
-    "function applyTarget(){let saved=localStorage.getItem(targetKey()); $('targetInput').value=saved===null?computedTarget():NUM(saved); $('targetSource').textContent=saved===null?'분기 성장 목표 자동 목표':'브라우저 저장 목표'}",
-    'apply target'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function handleDateChange\(\)\{if\(\$\('dateFrom'\)\.value>\$\('dateTo'\)\.value\)\{let t=\$\('dateFrom'\)\.value; \$\('dateFrom'\)\.value=\$\('dateTo'\)\.value; \$\('dateTo'\)\.value=t\} refreshFilterOptions\(\); applyTarget\(\); renderAll\(\)\}/,
-    "function handleDateChange(){clearTimeout(dateRenderTimer); let activeDateId=document.activeElement&&document.activeElement.id; dateRenderTimer=setTimeout(()=>{if(!validDateValue($('dateFrom').value)||!validDateValue($('dateTo').value))return; if($('dateFrom').value>$('dateTo').value){if(activeDateId==='dateFrom')$('dateTo').value=$('dateFrom').value; else $('dateFrom').value=$('dateTo').value} refreshFilterOptions(); applyTarget(); renderAll()},220)}",
-    'safe handleDateChange'
   );
 
   html = replaceOrFail(
@@ -124,13 +52,6 @@
     "function rawFiltered(){let base=QUALITY_ROWS.length?QUALITY_ROWS:RAW_ROWS; if(!base.length)return []; let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
     "function productRows(){let base=PRODUCT_CACHE.length?PRODUCT_CACHE:RAW_ROWS; if(!base.length)return filtered(); let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||!r.channel||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||!r.manager||r.manager===mgr))}",
     'filters'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function initControls\(\)\{let ds=ALL\.map\(r=>r\.date\)\.sort\(\), latest=ds\.at\(-1\), start=latest\?latest\.slice\(0,8\)\+'01':''; if\(!\$\('dateFrom'\)\.value\)\$\('dateFrom'\)\.value=start; if\(!\$\('dateTo'\)\.value\)\$\('dateTo'\)\.value=latest; refreshFilterOptions\(\); applyTarget\(\)\}/,
-    "function initControls(){let ds=ALL.map(r=>r.date).filter(validDateValue).sort(), latest=ds.at(-1)||'', start=latest?latest.slice(0,8)+'01':''; if(!$('dateFrom').value)$('dateFrom').value=start; if(!$('dateTo').value)$('dateTo').value=latest; refreshFilterOptions(); applyTarget()}",
-    'safe initControls'
   );
 
   html = replaceOrFail(
@@ -159,26 +80,6 @@
     /function renderAll\(\)\{if\(!ALL\.length\)return; refreshFilterOptions\(\); let rows=filtered\(\), target=NUM\(\$\('targetInput'\)\.value\); \$\('rangePill'\)\.textContent=`\$\{\$\('dateFrom'\)\.value\} ~ \$\{\$\('dateTo'\)\.value\}`; renderKpis\(rows,target\); renderCumulative\(rows,target\); renderChannelProgress\(rows,target\); renderDaily\(rows\); renderMoM\(rows\); renderChannelDaily\(rows\); renderProfitStructure\(rows\); renderProduct\(rows\); renderChannelTable\(rows\); renderQuality\(rows\); renderManagerPage\(rows\)\}/,
     "function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderQuality(detailRows.length?detailRows:rows); renderManagerPage(rows)}",
     'renderAll'
-  );
-
-  html = replaceOrFail(
-    html,
-    /\$\('kRevenueSub'\)\.textContent=diff===null\?'전월 동기간 데이터 없음':`전월 동기 \$\{diff>=0\?'\+':''\}\$\{diff\.toFixed\(1\)\}%`;/,
-    "let yoy=fixed2025RevenueForRange($('dateFrom').value,$('dateTo').value), yoyDiff=yoy?(rev-yoy)/yoy*100:null; $('kRevenueSub').textContent=yoyDiff===null?'25년 비교 기준 없음':`25년 동기간 ${KRW(yoy)} · ${yoyDiff>=0?'+':''}${yoyDiff.toFixed(1)}%`;",
-    'kpi yoy'
-  );
-
-  html = replaceOrFail(
-    html,
-    /<div class="summary-strip"><div class="summary-box"><span id="momCurLabel">현재 기간<\/span><b id="momCurTotal">-<\/b><\/div><div class="summary-box"><span id="momPrevLabel">전월 동기간<\/span><b id="momPrevTotal">-<\/b><\/div><div class="summary-box"><span>증감<\/span><b id="momDiff">-<\/b><\/div><\/div>/,
-    '<div class="summary-strip"><div class="summary-box"><span id="momCurLabel">현재 기간</span><b id="momCurTotal">-</b></div><div class="summary-box"><span id="momPrevLabel">전월 동기간</span><b id="momPrevTotal">-</b></div><div class="summary-box"><span>25년 월환산</span><b id="momYoyTotal">-</b></div><div class="summary-box"><span>전년비</span><b id="momYoyDiff">-</b></div></div>',
-    'mom yoy cards'
-  );
-
-  html = replaceFunction(
-    html,
-    'renderMoM',
-    "function renderMoM(rows){let pr=prevRange(),prev=sameFilterRows(pr.from,pr.to),currDates=dateList($('dateFrom').value,$('dateTo').value),prevDates=dateList(pr.from,pr.to),len=Math.min(currDates.length,prevDates.length),curBy=group(rows,'date'),prevBy=group(prev,'date'),labels=[],cur=[],p=[],y=[];for(let i=0;i<len;i++){let d=currDates[i];labels.push(String(i+1));cur.push(sum(curBy.get(d)||[],'revenue'));p.push(sum(prevBy.get(prevDates[i])||[],'revenue'));y.push(yoyDailyValue(d))}let c=sum(rows,'revenue'),pv=sum(prev,'revenue'),yy=fixed2025RevenueForRange($('dateFrom').value,$('dateTo').value),diff=pv?(c-pv)/pv*100:null,yoyDiff=yy?(c-yy)/yy*100:null;$('momCurLabel').textContent=$('dateFrom').value+' ~ '+$('dateTo').value;$('momPrevLabel').textContent=pr.from+' ~ '+pr.to;$('momCurTotal').textContent=KRW(c);$('momPrevTotal').textContent=KRW(pv);$('momDiff').textContent=diff===null?'전월 데이터 없음':(diff>=0?'+':'')+diff.toFixed(1)+'%';$('momDiff').className=diff!==null&&diff<0?'neg':'pos';$('momYoyTotal').textContent=KRW(yy);$('momYoyDiff').textContent=yoyDiff===null?'25년 기준 없음':(yoyDiff>=0?'+':'')+yoyDiff.toFixed(1)+'%';$('momYoyDiff').className=yoyDiff!==null&&yoyDiff<0?'neg':'pos';$('momHint').textContent='전월 '+(diff===null?'데이터 없음':(diff>=0?'+':'')+diff.toFixed(1)+'%')+' · 25년 '+(yoyDiff===null?'기준 없음':(yoyDiff>=0?'+':'')+yoyDiff.toFixed(1)+'%');setChart('momChart',{type:'line',data:{labels,datasets:[{label:'현재 기간',data:cur,borderColor:'#2563eb',backgroundColor:'#2563eb',tension:.3},{label:'전월 동기간',data:p,borderColor:'#94a3b8',backgroundColor:'#94a3b8',tension:.3},{label:'25년 월환산',data:y,borderColor:'#16a34a',backgroundColor:'#16a34a',borderDash:[6,4],pointRadius:0,tension:0}]},options:{maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{title:c=>'기간 '+c[0].label+'일차',label:c=>c.dataset.label+': '+KRW(c.raw)}}},scales:commonScale()}})}"
   );
 
   document.open();
