@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OURBOX 프로모션 운영 캘린더 (편집)</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#17202a;--muted:#667085;--line:#d8dee8;--soft:#eef2f7;--brand:#176b87;--brand-dark:#0f4f63;--green:#18864b;--orange:#c56514;--red:#b42318;--yellow:#f79009;--shadow:0 14px 40px rgba(15,23,42,.08)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}button,input,select,textarea{font:inherit}button{cursor:pointer}.app{min-height:100vh;padding:24px}
+.topbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:16px;align-items:end;margin-bottom:18px}.eyebrow{margin:0 0 6px;color:var(--brand-dark);font-size:13px;font-weight:800}h1{margin:0;font-size:clamp(26px,3vw,40px);line-height:1.1}.subcopy{margin:10px 0 0;color:var(--muted);line-height:1.5}.controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+.month-control,.role-pill,.primary-button,.ghost-button{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);min-height:38px;padding:8px 12px;font-weight:700}.primary-button{border-color:var(--brand);background:var(--brand);color:#fff}.ghost-button:hover,.month-control:hover{background:var(--soft)}
+.action-strip{border:2px solid var(--orange);border-radius:8px;background:#fff7ed;padding:14px 18px;margin-bottom:14px;font-size:13px;line-height:1.6}.action-strip strong{color:var(--orange);font-weight:900}.action-strip em{font-style:normal;color:var(--red);font-weight:900}
+.dashboard-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric{min-height:96px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px;box-shadow:var(--shadow)}.metric-label{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:13px;font-weight:700}.metric-value{margin-top:10px;font-size:26px;font-weight:900}.metric-note{margin-top:6px;color:var(--muted);font-size:12px}
+.calendar-shell{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}.calendar-grid{min-width:1180px;display:grid;grid-template-columns:repeat(7,minmax(132px,1fr)) 156px}.day-header,.week-header{position:sticky;top:0;z-index:2;min-height:44px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fbfcfe;padding:12px 10px;font-size:13px;font-weight:900;text-align:center}.week-header{border-right:0;background:#eef6f8;color:var(--brand-dark)}
+.day-cell{min-height:150px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;padding:9px;transition:background .15s ease}.day-cell:hover{background:#f8fbfc}.day-cell.outside{background:#f2f4f7;color:#98a2b3}.day-cell.today .date-number{background:var(--brand);color:#fff}.day-cell.peak{background:#fff5e6;border-left:3px solid var(--orange)}.day-cell.peak-high{background:#ffe8e8;border-left:3px solid var(--red)}
+.date-row{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px}.date-number{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:900}.star-btn{width:28px;height:28px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--muted);font-size:16px;line-height:1;transition:all .15s}.star-btn:hover{background:var(--soft)}.star-btn.on{color:var(--orange);background:#fff7ed;border-color:var(--orange)}
+.promo-card{border-left:4px solid var(--brand);border-radius:7px;background:#f7fbfc;margin:7px 0;padding:8px;color:var(--ink);font-size:12px;cursor:pointer;transition:all .15s}.promo-card:hover{background:#eef6f8;box-shadow:0 2px 8px rgba(23,107,135,.12)}.promo-title{font-weight:900;line-height:1.25;margin-bottom:4px}.promo-meta{color:var(--muted);line-height:1.35}
+.week-total{min-height:150px;border-bottom:1px solid var(--line);background:#f2faf9;padding:12px}.week-total strong{display:block;font-size:24px;line-height:1.1;color:var(--brand-dark)}.week-total span{display:block;margin-top:6px;color:var(--muted);font-size:12px;line-height:1.4}
+.modal-backdrop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.48);padding:20px}.modal-backdrop.open{display:flex}.modal{width:min(720px,100%);max-height:calc(100vh - 40px);overflow:auto;border-radius:8px;background:var(--panel);box-shadow:0 24px 80px rgba(15,23,42,.24)}.modal-header{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:18px 20px}.modal-header h2{margin:0;font-size:20px}.close-button{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:#fff;font-size:20px;line-height:1}
+form{padding:20px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}label{display:grid;gap:7px;color:var(--muted);font-size:13px;font-weight:800}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);padding:10px 11px}textarea{min-height:92px;resize:vertical}.full{grid-column:1/-1}.form-actions{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);margin:18px -20px -20px;padding:16px 20px;background:#fbfcfe}
+.loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:24px 36px;box-shadow:var(--shadow);font-weight:700;color:var(--brand-dark)}
+@media(max-width:860px){.app{padding:16px}.topbar{grid-template-columns:1fr}.controls{justify-content:flex-start}.dashboard-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.dashboard-strip{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="loading" id="loading">데이터 불러오는 중...</div>
+
+<main class="app" style="display:none" id="mainApp">
+<section class="topbar">
+  <div>
+    <p class="eyebrow">OURBOX PROMOTION OPS</p>
+    <h1>월간 프로모션 운영 캘린더</h1>
+    <p class="subcopy">MD/마케팅 등록 기준으로 CS, 물류, 생산이 같은 화면에서 프로모션 기간과 예상 출고 부담을 확인합니다.</p>
+  </div>
+  <div class="controls">
+    <button class="month-control" id="prevMonth">‹</button>
+    <strong class="role-pill" id="currentMonthLabel">2026년 5월</strong>
+    <button class="month-control" id="nextMonth">›</button>
+    <span class="role-pill">편집 권한: MD/마케팅</span>
+    <button class="primary-button" id="newPromotionButton">프로모션 등록</button>
+  </div>
+</section>
+
+<section class="action-strip" id="actionStrip" style="display:none">
+  <strong>오늘의 액션</strong> <span id="actionContent"></span>
+</section>
+
+<section class="dashboard-strip">
+  <div class="metric">
+    <div class="metric-label"><span>이번 달 프로모션</span><span>건수</span></div>
+    <div class="metric-value" id="metricCount">-</div>
+    <div class="metric-note">등록된 기준 이벤트 기준</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>예상 추가 출고</span><span>수량</span></div>
+    <div class="metric-value" id="metricQty">-</div>
+    <div class="metric-note">수량 구간 기준 합산</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>가장 많은 주차</span><span>피크</span></div>
+    <div class="metric-value" id="metricPeak">-</div>
+    <div class="metric-note" id="metricPeakNote">주차 합계 기준</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>최근 변경</span><span>일시</span></div>
+    <div class="metric-value" style="font-size:16px" id="metricUpdated">-</div>
+    <div class="metric-note" id="metricUpdatedBy">-</div>
+  </div>
+</section>
+
+<section class="calendar-shell">
+  <div class="calendar-grid" id="calendarGrid"></div>
+</section>
+</main>
+
+<div class="modal-backdrop" id="modalBackdrop">
+<section class="modal">
+  <div class="modal-header">
+    <h2 id="modalTitle">프로모션 등록</h2>
+    <button class="close-button" id="closeModalButton">×</button>
+  </div>
+  <form id="promotionForm">
+    <input type="hidden" id="editingId">
+    <div class="form-grid">
+      <label class="full">프로모션명<input id="titleInput" required placeholder="예: 5월 라이브 특가"></label>
+      <label>시작일<input id="startDateInput" type="date" required></label>
+      <label>종료일<input id="endDateInput" type="date" required></label>
+      <label>상품/품목<select id="productInput" required></select></label>
+      <label>채널<select id="channelInput" required></select></label>
+      <label>예상 수량<select id="quantityInput" required>
+        <option value="200">200개</option>
+        <option value="500">500개</option>
+        <option value="1000">1000개</option>
+        <option value="2000">2000개</option>
+      </select></label>
+      <label>담당자<select id="ownerInput" required></select></label>
+      <label class="full">운영 메모<textarea id="memoInput" placeholder="CS/물류/생산이 알아야 할 내용"></textarea></label>
+    </div>
+    <div class="form-actions">
+      <div>
+        <button class="ghost-button" id="deleteButton" type="button" style="display:none;color:var(--red);border-color:var(--red)">삭제</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost-button" type="button" id="cancelButton">취소</button>
+        <button class="primary-button" type="submit">저장</button>
+      </div>
+    </div>
+  </form>
+</section>
+</div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbwama99AMKAZK_vxJkFf7PnxyTgd0t_INjMheflr2oR3zIoCeSQAoedsr9XlUWaipGFPw/exec';
+const ROLE = 'edit';
+const USER = 'MD'; // 실제로는 로그인 정보에서 가져와야 하지만 프로토타입에서는 하드코딩
+
+let state = {
+  visibleDate: new Date(2026, 4, 1),
+  promotions: [],
+  peakDays: [],
+  products: [],
+  channels: [],
+  owners: []
+};
+
+const els = {
+  loading: document.getElementById('loading'),
+  mainApp: document.getElementById('mainApp'),
+  grid: document.getElementById('calendarGrid'),
+  modal: document.getElementById('modalBackdrop'),
+  form: document.getElementById('promotionForm'),
+  actionStrip: document.getElementById('actionStrip'),
+  actionContent: document.getElementById('actionContent')
+};
+
+// ========== 유틸 ==========
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function num(v) { return v.toLocaleString('ko-KR'); }
+function toKey(d) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function parseKey(k) {
+  const [y, m, d] = k.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function addDays(d, n) {
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+function isSameDay(a, b) { return toKey(a) === toKey(b); }
+
+// ========== API 호출 ==========
+async function loadData() {
+  const res = await fetch(`${API}?action=load&role=${ROLE}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  state.promotions = data.promotions || [];
+  state.peakDays = data.peak_days || [];
+  state.products = data.products || [];
+  state.channels = data.channels || [];
+  state.owners = data.owners || [];
+}
+
+async function savePromotion(data) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'upsert', role: ROLE, data })
+  });
+  const result = await res.json();
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+async function deletePromotion(id) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', role: ROLE, id })
+  });
+  const result = await res.json();
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+async function togglePeak(dateStr) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'togglePeak', role: ROLE, date: dateStr, user: USER })
+  });
+  const result = await res.json();
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+// ========== 캘린더 로직 ==========
+function getWeeks(y, m) {
+  const first = new Date(y, m, 1);
+  const last = new Date(y, m + 1, 0);
+  let curr = addDays(first, -first.getDay());
+  const end = addDays(last, 6 - last.getDay());
+  const weeks = [];
+  while (curr <= end) {
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      week.push(new Date(curr));
+      curr = addDays(curr, 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+function getVisiblePromotions() {
+  const y = state.visibleDate.getFullYear(), m = state.visibleDate.getMonth();
+  const first = toKey(new Date(y, m, 1)), last = toKey(new Date(y, m + 1, 0));
+  return state.promotions.filter(p => p.end_date >= first && p.start_date <= last);
+}
+
+function isActive(p, dateKey) {
+  return p.start_date <= dateKey && p.end_date >= dateKey;
+}
+
+function qtyNum(tier) {
+  return tier === '2000' ? 2000 : Number(tier);
+}
+
+function getDateLoad(dateKey) {
+  // 그 날짜에 진행중인 프로모션들의 일일 부담 합산
+  // 단순 균등 분배 (settlement_pattern 없으므로)
+  let total = 0;
+  state.promotions.forEach(p => {
+    if (isActive(p, dateKey)) {
+      const start = parseKey(p.start_date), end = parseKey(p.end_date);
+      const days = Math.round((end - start) / 86400000) + 1;
+      total += qtyNum(p.expected_qty_tier) / days;
+    }
+  });
+  return Math.round(total);
+}
+
+// ========== 렌더링 ==========
+function renderActionStrip() {
+  const today = toKey(new Date());
+  const tomorrow = toKey(addDays(new Date(), 1));
+  const d3 = toKey(addDays(new Date(), 3));
+  
+  const startingToday = state.promotions.filter(p => p.start_date === today);
+  const endingToday = state.promotions.filter(p => p.end_date === today);
+  const within3Days = state.promotions.filter(p => p.start_date > today && p.start_date <= d3);
+  
+  let msgs = [];
+  if (startingToday.length) msgs.push(`오늘 시작 <em>${startingToday.length}건</em>`);
+  if (endingToday.length) msgs.push(`오늘 마감 <em>${endingToday.length}건</em>`);
+  if (within3Days.length) {
+    const names = within3Days.map(p => p.title).join(', ');
+    msgs.push(`D-3 이내: ${names}`);
+  }
+  
+  if (msgs.length) {
+    els.actionStrip.style.display = '';
+    els.actionContent.innerHTML = msgs.join(' | ');
+  } else {
+    els.actionStrip.style.display = 'none';
+  }
+}
+
+function renderMetrics() {
+  const vp = getVisiblePromotions();
+  const totalQty = vp.reduce((s, p) => s + qtyNum(p.expected_qty_tier), 0);
+  
+  // 최근 변경
+  const sorted = [...state.promotions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  const latest = sorted[0];
+  
+  document.getElementById('metricCount').textContent = vp.length + '건';
+  document.getElementById('metricQty').textContent = num(totalQty) + '개';
+  document.getElementById('metricUpdated').textContent = latest ? latest.updated_at : '-';
+  document.getElementById('metricUpdatedBy').textContent = latest ? latest.updated_by + '님 수정' : '-';
+  
+  // 피크 주차 (간단 계산 — 주차별 합산은 생략, 프로토타입)
+  document.getElementById('metricPeak').textContent = totalQty ? num(Math.round(totalQty / 4)) + '개' : '-';
+  document.getElementById('metricPeakNote').textContent = totalQty ? '평균 주차 출고' : '주차 합계 기준';
+}
+
+function renderCalendar() {
+  const y = state.visibleDate.getFullYear(), m = state.visibleDate.getMonth();
+  const weeks = getWeeks(y, m);
+  const today = toKey(new Date());
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  
+  document.getElementById('currentMonthLabel').textContent = `${y}년 ${m + 1}월`;
+  els.grid.innerHTML = '';
+  
+  days.forEach(d => els.grid.appendChild(el('div', 'day-header', d)));
+  els.grid.appendChild(el('div', 'week-header', '주차 합계'));
+  
+  weeks.forEach((week, wi) => {
+    week.forEach(d => {
+      const key = toKey(d);
+      const isPeak = state.peakDays.includes(key);
+      const load = getDateLoad(key);
+      const isOut = d.getMonth() !== m;
+      const isToday = key === today;
+      
+      let cellClass = 'day-cell';
+      if (isOut) cellClass += ' outside';
+      if (isToday) cellClass += ' today';
+      if (isPeak && load >= 1500) cellClass += ' peak-high';
+      else if (isPeak || load >= 800) cellClass += ' peak';
+      
+      const cell = el('div', cellClass);
+      
+      const row = el('div', 'date-row');
+      row.appendChild(el('span', 'date-number', String(d.getDate())));
+      
+      const starBtn = el('button', isPeak ? 'star-btn on' : 'star-btn', '⭐');
+      starBtn.onclick = async (e) => {
+        e.stopPropagation();
+        await togglePeak(key);
+        await loadData();
+        renderAll();
+      };
+      row.appendChild(starBtn);
+      cell.appendChild(row);
+      
+      state.promotions.filter(p => isActive(p, key)).forEach(p => {
+        const card = el('article', 'promo-card');
+        card.onclick = () => openEditModal(p);
+        card.appendChild(el('div', 'promo-title', p.title));
+        card.appendChild(el('div', 'promo-meta', `${p.channel} · ${p.expected_qty_tier}개`));
+        card.appendChild(el('div', 'promo-meta', `${p.product_name} · ${p.owner}`));
+        cell.appendChild(card);
+      });
+      
+      els.grid.appendChild(cell);
+    });
+    
+    // 주차 합계 (간단 구현)
+    const weekTotal = week.reduce((s, d) => s + getDateLoad(toKey(d)), 0);
+    const totalBox = el('div', 'week-total');
+    totalBox.appendChild(el('strong', '', num(weekTotal)));
+    totalBox.appendChild(el('span', '', `${wi + 1}주차 예상 추가 출고`));
+    els.grid.appendChild(totalBox);
+  });
+}
+
+function renderAll() {
+  renderActionStrip();
+  renderMetrics();
+  renderCalendar();
+}
+
+// ========== 모달 ==========
+function openNewModal() {
+  document.getElementById('modalTitle').textContent = '프로모션 등록';
+  document.getElementById('editingId').value = '';
+  els.form.reset();
+  document.getElementById('startDateInput').value = toKey(new Date());
+  document.getElementById('endDateInput').value = toKey(new Date());
+  document.getElementById('deleteButton').style.display = 'none';
+  els.modal.classList.add('open');
+}
+
+function openEditModal(p) {
+  document.getElementById('modalTitle').textContent = '프로모션 수정';
+  document.getElementById('editingId').value = p.id;
+  document.getElementById('titleInput').value = p.title;
+  document.getElementById('startDateInput').value = p.start_date;
+  document.getElementById('endDateInput').value = p.end_date;
+  document.getElementById('productInput').value = p.product_name;
+  document.getElementById('channelInput').value = p.channel;
+  document.getElementById('quantityInput').value = p.expected_qty_tier;
+  document.getElementById('ownerInput').value = p.owner;
+  document.getElementById('memoInput').value = p.memo;
+  document.getElementById('deleteButton').style.display = '';
+  els.modal.classList.add('open');
+}
+
+function closeModal() {
+  els.modal.classList.remove('open');
+}
+
+// ========== 이벤트 ==========
+document.getElementById('newPromotionButton').onclick = openNewModal;
+document.getElementById('closeModalButton').onclick = closeModal;
+document.getElementById('cancelButton').onclick = closeModal;
+
+document.getElementById('prevMonth').onclick = () => {
+  state.visibleDate.setMonth(state.visibleDate.getMonth() - 1);
+  renderAll();
+};
+document.getElementById('nextMonth').onclick = () => {
+  state.visibleDate.setMonth(state.visibleDate.getMonth() + 1);
+  renderAll();
+};
+
+document.getElementById('deleteButton').onclick = async () => {
+  if (!confirm('정말 삭제하시겠습니까?')) return;
+  const id = document.getElementById('editingId').value;
+  await deletePromotion(id);
+  await loadData();
+  closeModal();
+  renderAll();
+};
+
+els.form.onsubmit = async (e) => {
+  e.preventDefault();
+  const data = {
+    id: document.getElementById('editingId').value || undefined,
+    title: document.getElementById('titleInput').value,
+    start_date: document.getElementById('startDateInput').value,
+    end_date: document.getElementById('endDateInput').value,
+    product_name: document.getElementById('productInput').value,
+    channel: document.getElementById('channelInput').value,
+    expected_qty_tier: document.getElementById('quantityInput').value,
+    owner: document.getElementById('ownerInput').value,
+    memo: document.getElementById('memoInput').value,
+    updated_by: USER
+  };
+  
+  if (data.start_date > data.end_date) {
+    alert('종료일은 시작일 이후여야 합니다.');
+    return;
+  }
+  
+  await savePromotion(data);
+  await loadData();
+  closeModal();
+  renderAll();
+};
+
+// ========== 초기화 ==========
+async function init() {
+  try {
+    await loadData();
+    
+    // 드롭다운 채우기
+    const productSel = document.getElementById('productInput');
+    state.products.forEach(p => {
+      const opt = el('option', '', p);
+      opt.value = p;
+      productSel.appendChild(opt);
+    });
+    
+    const channelSel = document.getElementById('channelInput');
+    state.channels.forEach(c => {
+      const opt = el('option', '', c);
+      opt.value = c;
+      channelSel.appendChild(opt);
+    });
+    
+    const ownerSel = document.getElementById('ownerInput');
+    state.owners.forEach(o => {
+      const opt = el('option', '', o);
+      opt.value = o;
+      ownerSel.appendChild(opt);
+    });
+    
+    renderAll();
+    els.loading.style.display = 'none';
+    els.mainApp.style.display = '';
+  } catch (err) {
+    els.loading.textContent = '오류: ' + err.message;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
