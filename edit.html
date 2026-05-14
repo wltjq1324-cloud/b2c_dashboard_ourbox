@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<!-- saved from url=(0043)file:///C:/Users/batt/Downloads/edit_3.html -->
+<html lang="ko"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OURBOX 프로모션 운영 캘린더 (편집)</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--ink:#17202a;--muted:#667085;--line:#d8dee8;
+  --soft:#eef2f7;--brand:#176b87;--brand-dark:#0f4f63;--green:#18864b;
+  --orange:#c56514;--red:#b42318;--shadow:0 14px 40px rgba(15,23,42,.08);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}
+button,input,select,textarea{font:inherit}button{cursor:pointer}
+.app{min-height:100vh;padding:24px}
+
+.topbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:16px;align-items:end;margin-bottom:18px}
+.eyebrow{margin:0 0 6px;color:var(--brand-dark);font-size:13px;font-weight:800}
+h1{margin:0;font-size:clamp(26px,3vw,40px);line-height:1.1}
+.subcopy{margin:10px 0 0;color:var(--muted);line-height:1.5}
+.controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+.month-control,.role-pill,.primary-button,.ghost-button{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);min-height:38px;padding:8px 12px;font-weight:700}
+.primary-button{border-color:var(--brand);background:var(--brand);color:#fff}
+.ghost-button:hover,.month-control:hover{background:var(--soft)}
+
+.action-strip{border:2px solid var(--orange);border-radius:8px;background:#fff7ed;padding:14px 18px;margin-bottom:14px;font-size:13px;line-height:1.6}
+.action-strip strong{color:var(--orange);font-weight:900}
+.action-strip em{font-style:normal;color:var(--red);font-weight:900}
+
+.dashboard-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.metric{min-height:96px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px;box-shadow:var(--shadow)}
+.metric-label{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:13px;font-weight:700}
+.metric-value{margin-top:10px;font-size:26px;font-weight:900}
+.metric-note{margin-top:6px;color:var(--muted);font-size:12px}
+
+.calendar-shell{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}
+.calendar-grid{min-width:1280px;display:grid;grid-template-columns:repeat(7,minmax(132px,1fr)) 240px}
+.day-header,.week-header{position:sticky;top:0;z-index:2;min-height:44px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fbfcfe;padding:12px 10px;font-size:13px;font-weight:900;text-align:center}
+.week-header{border-right:0;background:#eef6f8;color:var(--brand-dark)}
+.day-cell{min-height:180px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;padding:8px 2px 8px 8px;position:relative;overflow:visible}
+.day-cell:hover{background:#fafcfd}
+.day-cell.outside{background:#f2f4f7;color:#98a2b3}
+.day-cell.today .date-number{background:var(--brand);color:#fff}
+.date-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.date-number{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:900}
+
+.promo-slot{height:34px;margin:2px 0;position:relative}
+.promo-bar{position:absolute;top:3px;bottom:3px;left:0;right:4px;border-radius:6px;padding:0 8px;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#fff;cursor:pointer;overflow:hidden;white-space:nowrap;transition:filter .15s}
+.promo-bar:hover{filter:brightness(1.12)}
+.promo-bar.start{border-radius:6px 0 0 6px;right:-2px}
+.promo-bar.middle{border-radius:0;left:-2px;right:-2px}
+.promo-bar.end{border-radius:0 6px 6px 0;left:-2px}
+.promo-bar.single{border-radius:6px}
+.promo-bar.start.end{border-radius:6px;right:4px}
+.bar-title{flex:1;overflow:hidden;text-overflow:ellipsis}
+.bar-qty{font-size:11px;opacity:.85;flex-shrink:0}
+
+.week-total{min-height:180px;border-bottom:1px solid var(--line);background:#f2faf9;padding:12px;font-size:12px;line-height:1.45;overflow-y:auto;max-height:380px}
+.week-total-head{font-weight:900;color:var(--brand-dark);font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.week-total-sum{color:var(--brand-dark);font-weight:900;font-size:15px}
+.week-promo{margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed #d3e3e6}
+.week-promo:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
+.week-promo-name{font-weight:800;color:var(--ink);margin-bottom:3px;font-size:12px}
+.week-promo-sku{color:var(--muted);font-size:11.5px;line-height:1.5;padding-left:4px}
+.week-total-empty{color:var(--muted);font-size:12px}
+
+/* 모달 */
+.modal-backdrop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.48);padding:20px}
+.modal-backdrop.open{display:flex}
+.modal{width:min(920px,100%);max-height:calc(100vh - 40px);overflow:auto;border-radius:8px;background:var(--panel);box-shadow:0 24px 80px rgba(15,23,42,.24)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:18px 20px}
+.modal-header h2{margin:0;font-size:20px}
+.close-button{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:#fff;font-size:20px;line-height:1}
+form{padding:20px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+label{display:grid;gap:7px;color:var(--muted);font-size:13px;font-weight:800}
+input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);padding:10px 11px}
+textarea{min-height:80px;resize:vertical}
+.full{grid-column:1/-1}
+.form-actions{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);margin:18px -20px -20px;padding:16px 20px;background:#fbfcfe}
+
+/* SKU 입력 영역 */
+.sku-section{grid-column:1/-1}
+.sku-section-label{color:var(--muted);font-size:13px;font-weight:800;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.sku-section-label .hint{color:var(--muted);font-weight:600;font-size:12px}
+.sku-rows{display:flex;flex-direction:column;gap:10px}
+.sku-row{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);flex-wrap:wrap}
+.sku-row-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.sku-items{flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.sku-item-select{min-width:160px;flex:1}
+.sku-item-plus{color:var(--muted);font-weight:900;font-size:14px;flex:0 0 auto}
+.sku-add-bundle{flex:0 0 auto;border:1px dashed var(--line);border-radius:6px;background:#fff;color:var(--muted);font-size:11px;padding:7px 10px;font-weight:700;white-space:nowrap}
+.sku-add-bundle:hover{border-color:var(--brand);color:var(--brand)}
+.sku-item-remove{flex:0 0 auto;width:22px;height:22px;border:none;border-radius:50%;background:#fff;color:var(--muted);font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center}
+.sku-item-remove:hover{background:var(--red);color:#fff}
+.sku-qty-group{flex:0 0 auto;display:flex;gap:4px;align-items:center}
+.sku-qty-display{width:80px;text-align:center;border:1px solid var(--line);border-radius:6px;padding:7px 8px;background:#fff;font-weight:900;font-size:13px}
+.sku-qty-btn{border:1px solid var(--brand);border-radius:6px;background:#fff;color:var(--brand);font-weight:900;padding:6px 9px;font-size:11px;white-space:nowrap}
+.sku-qty-btn:hover{background:var(--brand);color:#fff}
+.sku-qty-reset{border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);padding:6px 8px;font-size:11px;font-weight:700}
+.sku-qty-reset:hover{border-color:var(--red);color:var(--red)}
+.sku-row-remove{flex:0 0 auto;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);padding:6px 9px;font-size:11px;font-weight:700}
+.sku-row-remove:hover{border-color:var(--red);color:var(--red);background:#fff5f5}
+.sku-add-row{margin-top:8px;border:2px dashed var(--line);border-radius:8px;background:#fff;color:var(--muted);font-weight:700;padding:10px;font-size:13px;width:100%}
+.sku-add-row:hover{border-color:var(--brand);color:var(--brand)}
+.sku-total-row{margin-top:10px;padding:10px;background:#eef6f8;border-radius:6px;color:var(--brand-dark);font-size:13px;font-weight:800;text-align:right}
+
+.saving-overlay{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.28)}
+.saving-overlay.open{display:flex}
+.saving-box{background:#fff;border-radius:8px;padding:18px 32px;box-shadow:var(--shadow);font-weight:700;color:var(--brand-dark)}
+.loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:24px 36px;box-shadow:var(--shadow);font-weight:700;color:var(--brand-dark)}
+
+@media(max-width:860px){.app{padding:16px}.topbar{grid-template-columns:1fr}.controls{justify-content:flex-start}.dashboard-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.dashboard-strip{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="loading" id="loading" style="display: none;">데이터 불러오는 중...</div>
+<div class="saving-overlay" id="savingOverlay"><div class="saving-box">⏳ 저장 중입니다...</div></div>
+
+<main class="app" style="" id="mainApp">
+<section class="topbar">
+  <div>
+    <p class="eyebrow">OURBOX PROMOTION OPS</p>
+    <h1>월간 프로모션 운영 캘린더</h1>
+    <p class="subcopy">MD/마케팅 등록 기준으로 CS, 물류, 생산이 같은 화면에서 프로모션 기간과 예상 출고 부담을 확인합니다.</p>
+  </div>
+  <div class="controls">
+    <button class="month-control" id="prevMonth">‹</button>
+    <strong class="role-pill" id="currentMonthLabel">2026년 5월</strong>
+    <button class="month-control" id="nextMonth">›</button>
+    <span class="role-pill">편집 권한: MD/마케팅</span>
+    <button class="primary-button" id="newPromotionButton">프로모션 등록</button>
+  </div>
+</section>
+
+<section class="action-strip" id="actionStrip" style="">
+  <strong>오늘의 액션 &nbsp;</strong><span id="actionContent">D-3 이내: <em>네이버 톡딜</em></span>
+</section>
+
+<section class="dashboard-strip">
+  <div class="metric">
+    <div class="metric-label"><span>이번 달 프로모션</span><span>건수</span></div>
+    <div class="metric-value" id="metricCount">2건</div>
+    <div class="metric-note">등록된 이벤트 기준</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>예상 추가 출고</span><span>수량</span></div>
+    <div class="metric-value" id="metricQty">0개</div>
+    <div class="metric-note">행 수량 합산</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>가장 바쁜 주차</span><span>피크</span></div>
+    <div class="metric-value" id="metricPeak">-</div>
+    <div class="metric-note" id="metricPeakNote">주차 합계 기준</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label"><span>최근 변경</span><span>일시</span></div>
+    <div class="metric-value" style="font-size:15px;line-height:1.3" id="metricUpdated">2026-05-14 11:02</div>
+    <div class="metric-note" id="metricUpdatedBy">MD님 수정</div>
+  </div>
+</section>
+
+<section class="calendar-shell">
+  <div class="calendar-grid" id="calendarGrid"><div class="day-header">일</div><div class="day-header">월</div><div class="day-header">화</div><div class="day-header">수</div><div class="day-header">목</div><div class="day-header">금</div><div class="day-header">토</div><div class="week-header">주차 합계</div><div class="day-cell outside"><div class="date-row"><span class="date-number">26</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">27</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">28</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">29</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">30</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">1</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">2</span></div></div><div class="week-total"><div class="week-total-head"><span>1주차 예상 출고</span><span class="week-total-sum">0개</span></div><div class="week-total-empty">등록된 프로모션 없음</div></div><div class="day-cell"><div class="date-row"><span class="date-number">3</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">4</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">5</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">6</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">7</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">8</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">9</span></div></div><div class="week-total"><div class="week-total-head"><span>2주차 예상 출고</span><span class="week-total-sum">0개</span></div><div class="week-total-empty">등록된 프로모션 없음</div></div><div class="day-cell"><div class="date-row"><span class="date-number">10</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">11</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">12</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">13</span></div></div><div class="day-cell today"><div class="date-row"><span class="date-number">14</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">15</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">16</span></div><div class="promo-slot"><div class="promo-bar start end" style="background: rgb(229, 57, 53);"><span class="bar-title">네이버 톡딜</span></div></div></div><div class="week-total"><div class="week-total-head"><span>3주차 예상 출고</span><span class="week-total-sum">0개</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">17</span></div><div class="promo-slot"><div class="promo-bar start" style="background: rgb(229, 57, 53);"><span class="bar-title">네이버 톡딜</span></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">18</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">19</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">20</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">21</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">22</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">23</span></div><div class="promo-slot"><div class="promo-bar end" style="background: rgb(229, 57, 53);"></div></div></div><div class="week-total"><div class="week-total-head"><span>4주차 예상 출고</span><span class="week-total-sum">0개</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">24</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">25</span></div><div class="promo-slot"><div class="promo-bar start" style="background: rgb(229, 57, 53);"><span class="bar-title">ㅋㅋㅋㅋ</span></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">26</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">27</span></div><div class="promo-slot"><div class="promo-bar middle" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">28</span></div><div class="promo-slot"><div class="promo-bar end" style="background: rgb(229, 57, 53);"></div></div></div><div class="day-cell"><div class="date-row"><span class="date-number">29</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">30</span></div></div><div class="week-total"><div class="week-total-head"><span>5주차 예상 출고</span><span class="week-total-sum">0개</span></div></div><div class="day-cell"><div class="date-row"><span class="date-number">31</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">1</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">2</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">3</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">4</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">5</span></div></div><div class="day-cell outside"><div class="date-row"><span class="date-number">6</span></div></div><div class="week-total"><div class="week-total-head"><span>6주차 예상 출고</span><span class="week-total-sum">0개</span></div><div class="week-total-empty">등록된 프로모션 없음</div></div></div>
+</section>
+</main>
+
+<!-- 모달 -->
+<div class="modal-backdrop" id="modalBackdrop">
+<section class="modal">
+  <div class="modal-header">
+    <h2 id="modalTitle">프로모션 등록</h2>
+    <button class="close-button" id="closeModalButton">×</button>
+  </div>
+  <form id="promotionForm">
+    <input type="hidden" id="editingId">
+    <div class="form-grid">
+      <label class="full">프로모션명<input id="titleInput" required="" placeholder="예: 5월 라이브 특가"></label>
+      <label>시작일<input id="startDateInput" type="date" required=""></label>
+      <label>종료일<input id="endDateInput" type="date" required=""></label>
+      <label>채널<select id="channelInput" required=""><option value="자사몰">자사몰</option><option value="네이버">네이버</option><option value="카카오">카카오</option><option value="기타">기타</option></select></label>
+      <label>담당자<select id="ownerInput" required=""><option value="장정환">장정환</option><option value="민예은">민예은</option><option value="안서준">안서준</option><option value="김슬기">김슬기</option></select></label>
+
+      <div class="sku-section full">
+        <div class="sku-section-label">
+          <span>SKU 구성 / 예상 수량</span>
+          <span class="hint">행 = 출고 단위 · 한 행에 묶음 추가 가능 (행 10개 / 묶음 5개)</span>
+        </div>
+        <div class="sku-rows" id="skuRows"></div>
+        <button class="sku-add-row" id="addSkuRowBtn" type="button">+ 행 추가</button>
+        <div class="sku-total-row">합계: <span id="skuTotalDisplay">0</span>개</div>
+      </div>
+
+      <label class="full">운영 메모<textarea id="memoInput" placeholder="CS/물류/생산이 알아야 할 내용 (특정일 출고 집중, 사은품, 합포장 주의사항 등)"></textarea></label>
+    </div>
+    <div class="form-actions">
+      <div><button class="ghost-button" id="deleteButton" type="button" style="display:none;color:var(--red);border-color:var(--red)">삭제</button></div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost-button" type="button" id="cancelButton">취소</button>
+        <button class="primary-button" type="submit" id="submitButton">저장</button>
+      </div>
+    </div>
+  </form>
+</section>
+</div>
+
+<script>
+const API   = 'https://script.google.com/macros/s/AKfycbwama99AMKAZK_vxJkFf7PnxyTgd0t_INjMheflr2oR3zIoCeSQAoedsr9XlUWaipGFPw/exec';
+const ROLE  = 'edit';
+const USER  = 'MD';
+const COLORS = ['#e53935','#f4511e','#f6bf26','#33b679','#039be5','#3f51b5','#8e24aa'];
+const MAX_ROWS = 10;
+const MAX_BUNDLE = 5;
+
+let state = {
+  visibleDate: new Date(),
+  promotions: [],
+  products: [], channels: [], owners: [],
+  colorMap: {}
+};
+let isSaving = false;
+
+// ===== 유틸 =====
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
+function num(v){return Number(v||0).toLocaleString('ko-KR')}
+function toKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function parseKey(k){const[y,m,d]=k.split('-').map(Number);return new Date(y,m-1,d)}
+function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r}
+
+// ===== SKU 파싱/직렬화 (JSON) =====
+// [{items:["A","B"],qty:300},{items:["C"],qty:500}]
+function parseSku(str){
+  if(!str)return[];
+  // JSON 형식 시도
+  try{
+    const j=JSON.parse(str);
+    if(Array.isArray(j))return j.filter(r=>r&&Array.isArray(r.items));
+  }catch(e){}
+  // 옛 데이터(단순 문자열) 호환
+  return [{items:[String(str)],qty:0}];
+}
+function serializeSku(rows){
+  return JSON.stringify(rows.filter(r=>r.items.length&&r.qty>0));
+}
+function totalQtyFromStr(str){
+  return parseSku(str).reduce((s,r)=>s+(Number(r.qty)||0),0);
+}
+function formatSkuLine(row){
+  const items=row.items.join(' + ');
+  return `${items} (${num(row.qty)}개)`;
+}
+
+// ===== 색상 =====
+function assignColors(){
+  state.colorMap={};
+  const sorted=[...state.promotions].sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  sorted.forEach(p=>{
+    const used=new Set();
+    state.promotions.forEach(o=>{
+      if(o.id===p.id||state.colorMap[o.id]===undefined)return;
+      if(o.start_date<=p.end_date&&o.end_date>=p.start_date)used.add(state.colorMap[o.id]);
+    });
+    let pick=0;for(let i=0;i<COLORS.length;i++){if(!used.has(i)){pick=i;break;}}
+    state.colorMap[p.id]=pick;
+  });
+}
+function getColor(id){return COLORS[state.colorMap[id]??0]}
+
+// ===== API =====
+async function loadData(){
+  const res=await fetch(`${API}?action=load&role=${ROLE}`);
+  const data=await res.json();
+  if(data.error)throw new Error(data.error);
+  state.promotions=data.promotions||[];
+  state.products=data.products||[];
+  state.channels=data.channels||[];
+  state.owners=data.owners||[];
+  assignColors();
+}
+async function apiPost(body){
+  const res=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+  const r=await res.json();if(r.error)throw new Error(r.error);return r;
+}
+
+function showSaving(){document.getElementById('savingOverlay').classList.add('open');document.getElementById('submitButton').disabled=true;document.getElementById('deleteButton').disabled=true}
+function hideSaving(){document.getElementById('savingOverlay').classList.remove('open');document.getElementById('submitButton').disabled=false;document.getElementById('deleteButton').disabled=false}
+
+// ===== 캘린더 =====
+function getWeeks(y,m){
+  const first=new Date(y,m,1),last=new Date(y,m+1,0);
+  let curr=addDays(first,-first.getDay()),end=addDays(last,6-last.getDay()),weeks=[];
+  while(curr<=end){const w=[];for(let i=0;i<7;i++){w.push(new Date(curr));curr=addDays(curr,1)}weeks.push(w)}
+  return weeks;
+}
+function getVisiblePromotions(){
+  const y=state.visibleDate.getFullYear(),m=state.visibleDate.getMonth();
+  const first=toKey(new Date(y,m,1)),last=toKey(new Date(y,m+1,0));
+  return state.promotions.filter(p=>p.end_date>=first&&p.start_date<=last);
+}
+
+// 주차에 포함되는 일수 × (총수량/전체일수) 균등 분배
+function getPromoQtyInWeek(p,week){
+  const days=week.filter(d=>{const k=toKey(d);return p.start_date<=k&&p.end_date>=k}).length;
+  if(!days)return 0;
+  const span=Math.round((parseKey(p.end_date)-parseKey(p.start_date))/86400000)+1;
+  const total=totalQtyFromStr(p.product_name);
+  return Math.round(total/span*days);
+}
+function getWeekQty(week){
+  return state.promotions.reduce((s,p)=>s+getPromoQtyInWeek(p,week),0);
+}
+// SKU 행별 주차 분배 (각 행도 균등)
+function getPromoSkuInWeek(p,week){
+  const days=week.filter(d=>{const k=toKey(d);return p.start_date<=k&&p.end_date>=k}).length;
+  if(!days)return null;
+  const span=Math.round((parseKey(p.end_date)-parseKey(p.start_date))/86400000)+1;
+  const rows=parseSku(p.product_name);
+  return rows.map(r=>({items:r.items,qty:Math.round((Number(r.qty)||0)/span*days)})).filter(r=>r.qty>0);
+}
+
+// ===== 렌더 =====
+function renderActionStrip(){
+  const today=toKey(new Date()),d3=toKey(addDays(new Date(),3));
+  const starting=state.promotions.filter(p=>p.start_date===today);
+  const ending=state.promotions.filter(p=>p.end_date===today);
+  const upcoming=state.promotions.filter(p=>p.start_date>today&&p.start_date<=d3);
+  const msgs=[];
+  if(starting.length)msgs.push(`오늘 시작 <em>${starting.map(p=>p.title).join(', ')}</em>`);
+  if(ending.length)msgs.push(`오늘 마감 <em>${ending.map(p=>p.title).join(', ')}</em>`);
+  if(upcoming.length)msgs.push(`D-3 이내: <em>${upcoming.map(p=>p.title).join(', ')}</em>`);
+  const strip=document.getElementById('actionStrip');
+  if(msgs.length){strip.style.display='';document.getElementById('actionContent').innerHTML=msgs.join(' &nbsp;|&nbsp; ')}
+  else strip.style.display='none';
+}
+
+function renderMetrics(){
+  const vp=getVisiblePromotions();
+  const totalQty=vp.reduce((s,p)=>s+totalQtyFromStr(p.product_name),0);
+  const sorted=[...state.promotions].sort((a,b)=>(b.updated_at||'').localeCompare(a.updated_at||''));
+  const latest=sorted[0];
+  document.getElementById('metricCount').textContent=vp.length+'건';
+  document.getElementById('metricQty').textContent=num(totalQty)+'개';
+  document.getElementById('metricUpdated').textContent=latest?latest.updated_at:'-';
+  document.getElementById('metricUpdatedBy').textContent=latest?latest.updated_by+'님 수정':'-';
+  const y=state.visibleDate.getFullYear(),m=state.visibleDate.getMonth();
+  const weeks=getWeeks(y,m);
+  const qtys=weeks.map(w=>getWeekQty(w));
+  const maxQty=Math.max(...qtys,0),maxWi=qtys.indexOf(maxQty);
+  document.getElementById('metricPeak').textContent=maxQty?num(maxQty)+'개':'-';
+  document.getElementById('metricPeakNote').textContent=maxQty?`${maxWi+1}주차 예상 출고`:'주차 합계 기준';
+}
+
+function renderCalendar(){
+  const y=state.visibleDate.getFullYear(),m=state.visibleDate.getMonth();
+  const weeks=getWeeks(y,m);
+  const today=toKey(new Date());
+  document.getElementById('currentMonthLabel').textContent=`${y}년 ${m+1}월`;
+  const grid=document.getElementById('calendarGrid');
+  grid.innerHTML='';
+  ['일','월','화','수','목','금','토'].forEach(d=>grid.appendChild(el('div','day-header',d)));
+  grid.appendChild(el('div','week-header','주차 합계'));
+
+  // 슬롯 배정
+  const slotMap={};
+  const vp=getVisiblePromotions();
+  [...vp].sort((a,b)=>a.start_date.localeCompare(b.start_date)).forEach(p=>{
+    let used=new Set();
+    const s=parseKey(p.start_date),e=parseKey(p.end_date);
+    let d=new Date(s);
+    while(d<=e){const k=toKey(d);(slotMap[k]||[]).forEach((pid,ri)=>{if(pid)used.add(ri)});d=addDays(d,1)}
+    let row=0;while(used.has(row))row++;
+    d=new Date(s);
+    while(d<=e){const k=toKey(d);if(!slotMap[k])slotMap[k]=[];while(slotMap[k].length<=row)slotMap[k].push(null);slotMap[k][row]=p.id;d=addDays(d,1)}
+  });
+
+  weeks.forEach((week,wi)=>{
+    week.forEach(d=>{
+      const key=toKey(d);
+      const isOut=d.getMonth()!==m,isTod=key===today;
+      const cell=el('div','day-cell'+(isOut?' outside':'')+(isTod?' today':''));
+      const dateRow=el('div','date-row');
+      dateRow.appendChild(el('span','date-number',String(d.getDate())));
+      cell.appendChild(dateRow);
+
+      const slots=slotMap[key]||[];
+      slots.forEach(pid=>{
+        const slot=el('div','promo-slot');
+        if(!pid){cell.appendChild(slot);return}
+        const p=state.promotions.find(x=>x.id===pid);
+        if(!p){cell.appendChild(slot);return}
+        const color=getColor(p.id);
+        const isStart=p.start_date===key,isEnd=p.end_date===key;
+        const isWeekStart=d.getDay()===0,isWeekEnd=d.getDay()===6;
+        const isSingle=p.start_date===p.end_date;
+        let posClass='single';
+        if(!isSingle){
+          if((isStart||isWeekStart)&&(isEnd||isWeekEnd))posClass='start end';
+          else if(isStart||isWeekStart)posClass='start';
+          else if(isEnd||isWeekEnd)posClass='end';
+          else posClass='middle';
+        }
+        const bar=document.createElement('div');
+        bar.className=`promo-bar ${posClass}`;
+        bar.style.background=color;
+        bar.onclick=()=>openEditModal(p);
+        if(isStart||isWeekStart){
+          const qty=totalQtyFromStr(p.product_name);
+          bar.appendChild(el('span','bar-title',p.title));
+          if(qty)bar.appendChild(el('span','bar-qty',num(qty)+'개'));
+        }
+        slot.appendChild(bar);
+        cell.appendChild(slot);
+      });
+      grid.appendChild(cell);
+    });
+
+    // 주차 합계 셀
+    const box=el('div','week-total');
+    const head=el('div','week-total-head');
+    head.appendChild(el('span','',`${wi+1}주차 예상 출고`));
+    head.appendChild(el('span','week-total-sum',num(getWeekQty(week))+'개'));
+    box.appendChild(head);
+    // 주차 내 프로모션
+    const weekPromos=state.promotions.filter(p=>{
+      return week.some(d=>{const k=toKey(d);return p.start_date<=k&&p.end_date>=k});
+    });
+    if(weekPromos.length===0){
+      box.appendChild(el('div','week-total-empty','등록된 프로모션 없음'));
+    }else{
+      weekPromos.forEach(p=>{
+        const skus=getPromoSkuInWeek(p,week);
+        if(!skus||skus.length===0)return;
+        const promoBox=el('div','week-promo');
+        promoBox.appendChild(el('div','week-promo-name','['+p.title+']'));
+        skus.forEach(s=>{
+          promoBox.appendChild(el('div','week-promo-sku','· '+formatSkuLine(s)));
+        });
+        box.appendChild(promoBox);
+      });
+    }
+    grid.appendChild(box);
+  });
+}
+
+function renderAll(){renderActionStrip();renderMetrics();renderCalendar()}
+
+// ===== SKU 입력 UI =====
+function calcSkuTotal(){
+  const rows=document.querySelectorAll('.sku-row');
+  let total=0;
+  rows.forEach(r=>{
+    const q=Number(r.querySelector('.sku-qty-display').textContent)||0;
+    total+=q;
+  });
+  document.getElementById('skuTotalDisplay').textContent=num(total);
+}
+
+function makeBundleSelect(value=''){
+  const wrap=document.createElement('div');
+  wrap.style.display='flex';
+  wrap.style.alignItems='center';
+  wrap.style.gap='4px';
+
+  const sel=document.createElement('select');
+  sel.className='sku-item-select';
+  const empty=document.createElement('option');empty.value='';empty.textContent='-- 품목 선택 --';sel.appendChild(empty);
+  state.products.forEach(p=>{
+    const opt=document.createElement('option');opt.value=opt.textContent=p;
+    if(p===value)opt.selected=true;
+    sel.appendChild(opt);
+  });
+  wrap.appendChild(sel);
+
+  // 첫 묶음 외 삭제 버튼
+  const rm=el('button','sku-item-remove','×');rm.type='button';
+  rm.onclick=()=>{
+    const items=wrap.parentElement.querySelectorAll('.sku-item-select');
+    if(items.length<=1){alert('최소 1개 품목은 필요합니다.');return}
+    // 플러스 기호도 함께 처리: 앞 또는 뒤 + 제거
+    const prev=wrap.previousElementSibling;
+    const next=wrap.nextElementSibling;
+    if(prev&&prev.classList.contains('sku-item-plus'))prev.remove();
+    else if(next&&next.classList.contains('sku-item-plus'))next.remove();
+    wrap.remove();
+  };
+  wrap.appendChild(rm);
+  return wrap;
+}
+
+function makeSkuRow(rowData={items:[''],qty:0}){
+  const row=el('div','sku-row');
+
+  // 번호 (재계산은 호출부에서)
+  const numEl=el('div','sku-row-num','');
+  row.appendChild(numEl);
+
+  // 묶음 영역
+  const items=el('div','sku-items');
+  const itemList=rowData.items.length?rowData.items:[''];
+  itemList.forEach((v,i)=>{
+    if(i>0)items.appendChild(el('span','sku-item-plus','+'));
+    items.appendChild(makeBundleSelect(v));
+  });
+
+  // + 묶음 추가 버튼
+  const addBundleBtn=el('button','sku-add-bundle','+ 묶음 추가');addBundleBtn.type='button';
+  addBundleBtn.onclick=()=>{
+    const cnt=items.querySelectorAll('.sku-item-select').length;
+    if(cnt>=MAX_BUNDLE){alert('한 행에 묶음은 최대 5개입니다.');return}
+    items.insertBefore(el('span','sku-item-plus','+'),addBundleBtn);
+    items.insertBefore(makeBundleSelect(),addBundleBtn);
+  };
+  items.appendChild(addBundleBtn);
+  row.appendChild(items);
+
+  // 수량 영역
+  const qtyGroup=el('div','sku-qty-group');
+  const qtyDisp=el('div','sku-qty-display',String(Number(rowData.qty)||0));
+  const btn100=el('button','sku-qty-btn','+100');btn100.type='button';
+  const btn500=el('button','sku-qty-btn','+500');btn500.type='button';
+  const btnReset=el('button','sku-qty-reset','초기화');btnReset.type='button';
+  btn100.onclick=()=>{qtyDisp.textContent=String(Number(qtyDisp.textContent)+100);calcSkuTotal()};
+  btn500.onclick=()=>{qtyDisp.textContent=String(Number(qtyDisp.textContent)+500);calcSkuTotal()};
+  btnReset.onclick=()=>{qtyDisp.textContent='0';calcSkuTotal()};
+  qtyGroup.appendChild(qtyDisp);qtyGroup.appendChild(btn100);qtyGroup.appendChild(btn500);qtyGroup.appendChild(btnReset);
+  row.appendChild(qtyGroup);
+
+  // 행 삭제
+  const rmRow=el('button','sku-row-remove','행 삭제');rmRow.type='button';
+  rmRow.onclick=()=>{
+    const rows=document.querySelectorAll('.sku-row');
+    if(rows.length<=1){alert('최소 1개 행은 필요합니다.');return}
+    row.remove();renumberSkuRows();calcSkuTotal();
+  };
+  row.appendChild(rmRow);
+
+  return row;
+}
+
+function renumberSkuRows(){
+  document.querySelectorAll('.sku-row').forEach((r,i)=>{
+    r.querySelector('.sku-row-num').textContent=String(i+1);
+  });
+}
+
+function initSkuRows(rows=[]){
+  const cont=document.getElementById('skuRows');
+  cont.innerHTML='';
+  const list=rows.length?rows:[{items:[''],qty:0}];
+  list.forEach(r=>cont.appendChild(makeSkuRow(r)));
+  renumberSkuRows();
+  calcSkuTotal();
+}
+
+function collectSkuRows(){
+  const rows=[];
+  document.querySelectorAll('.sku-row').forEach(r=>{
+    const items=[];
+    r.querySelectorAll('.sku-item-select').forEach(s=>{
+      if(s.value)items.push(s.value);
+    });
+    const qty=Number(r.querySelector('.sku-qty-display').textContent)||0;
+    if(items.length&&qty>0)rows.push({items,qty});
+  });
+  return rows;
+}
+
+// ===== 모달 =====
+const modalEl=document.getElementById('modalBackdrop');
+function openNewModal(){
+  document.getElementById('modalTitle').textContent='프로모션 등록';
+  document.getElementById('editingId').value='';
+  document.getElementById('promotionForm').reset();
+  document.getElementById('startDateInput').value=toKey(new Date());
+  document.getElementById('endDateInput').value=toKey(new Date());
+  document.getElementById('deleteButton').style.display='none';
+  initSkuRows([]);
+  modalEl.classList.add('open');
+}
+function openEditModal(p){
+  document.getElementById('modalTitle').textContent='프로모션 수정';
+  document.getElementById('editingId').value=p.id;
+  document.getElementById('titleInput').value=p.title;
+  document.getElementById('startDateInput').value=p.start_date;
+  document.getElementById('endDateInput').value=p.end_date;
+  document.getElementById('channelInput').value=p.channel;
+  document.getElementById('ownerInput').value=p.owner;
+  document.getElementById('memoInput').value=p.memo||'';
+  document.getElementById('deleteButton').style.display='';
+  initSkuRows(parseSku(p.product_name));
+  modalEl.classList.add('open');
+}
+function closeModal(){modalEl.classList.remove('open')}
+
+// ===== 이벤트 =====
+document.getElementById('newPromotionButton').onclick=openNewModal;
+document.getElementById('closeModalButton').onclick=closeModal;
+document.getElementById('cancelButton').onclick=closeModal;
+document.getElementById('prevMonth').onclick=()=>{state.visibleDate.setMonth(state.visibleDate.getMonth()-1);renderAll()};
+document.getElementById('nextMonth').onclick=()=>{state.visibleDate.setMonth(state.visibleDate.getMonth()+1);renderAll()};
+
+document.getElementById('addSkuRowBtn').onclick=()=>{
+  const cnt=document.querySelectorAll('.sku-row').length;
+  if(cnt>=MAX_ROWS){alert('행은 최대 10개입니다.');return}
+  document.getElementById('skuRows').appendChild(makeSkuRow());
+  renumberSkuRows();
+};
+
+document.getElementById('deleteButton').onclick=async()=>{
+  if(isSaving)return;
+  if(!confirm('정말 삭제하시겠습니까?'))return;
+  isSaving=true;
+  const id=document.getElementById('editingId').value;
+  closeModal();showSaving();
+  try{await apiPost({action:'delete',role:ROLE,id});await loadData();renderAll()}
+  catch(err){alert('삭제 실패: '+err.message)}
+  finally{isSaving=false;hideSaving()}
+};
+
+document.getElementById('promotionForm').onsubmit=async(e)=>{
+  e.preventDefault();
+  if(isSaving)return;
+  const rows=collectSkuRows();
+  if(!rows.length){alert('SKU 1개 이상 + 수량 입력이 필요합니다.');return}
+  const totalQty=rows.reduce((s,r)=>s+r.qty,0);
+  const data={
+    id:document.getElementById('editingId').value||undefined,
+    title:document.getElementById('titleInput').value,
+    start_date:document.getElementById('startDateInput').value,
+    end_date:document.getElementById('endDateInput').value,
+    product_name:serializeSku(rows),
+    channel:document.getElementById('channelInput').value,
+    expected_qty_tier:String(totalQty),
+    owner:document.getElementById('ownerInput').value,
+    memo:document.getElementById('memoInput').value,
+    updated_by:USER
+  };
+  if(data.start_date>data.end_date){alert('종료일은 시작일 이후여야 합니다.');return}
+  isSaving=true;
+  closeModal();showSaving();
+  try{await apiPost({action:'upsert',role:ROLE,data});await loadData();renderAll()}
+  catch(err){alert('저장 실패: '+err.message)}
+  finally{isSaving=false;hideSaving()}
+};
+
+// ===== 초기화 =====
+async function init(){
+  try{
+    await loadData();
+    [['channelInput',state.channels],['ownerInput',state.owners]].forEach(([id,list])=>{
+      const sel=document.getElementById(id);
+      list.forEach(v=>{const opt=document.createElement('option');opt.value=opt.textContent=v;sel.appendChild(opt)});
+    });
+    renderAll();
+    document.getElementById('loading').style.display='none';
+    document.getElementById('mainApp').style.display='';
+  }catch(err){
+    document.getElementById('loading').textContent='오류: '+err.message;
+  }
+}
+init();
+</script>
+
+
+</body></html>
