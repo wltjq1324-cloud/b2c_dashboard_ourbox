@@ -57,10 +57,12 @@ h1{margin:0;font-size:clamp(26px,3vw,40px);line-height:1.1}
 .bar-qty{font-size:9.5px;opacity:.85;flex-shrink:0}
 
 .week-total{min-height:130px;border-bottom:1px solid var(--line);background:#f2faf9;padding:8px;font-size:10.5px;line-height:1.4;overflow-y:auto;max-height:300px}
-.week-total-head{font-size:11.5px}
-.week-total-sum{font-size:13px}
-.week-promo-name{font-size:11px}
-.week-promo-sku{font-size:10.5px}
+.week-total-head{font-weight:900;color:var(--brand-dark);font-size:11.5px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.week-total-sum{color:var(--brand-dark);font-weight:900;font-size:13px}
+.week-promo{margin-bottom:8px;padding-bottom:6px;border-bottom:1px dashed #d3e3e6}
+.week-promo:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
+.week-promo-name{font-weight:800;color:var(--ink);margin-bottom:2px;font-size:11px}
+.week-promo-sku{color:var(--muted);font-size:10.5px;line-height:1.45;padding-left:3px}
 .week-total-empty{color:var(--muted);font-size:12px}
 
 /* 모달 */
