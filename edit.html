@@ -115,8 +115,14 @@ textarea{min-height:80px;resize:vertical}
 .recent-item .recent-date{color:var(--muted);font-weight:700}
 .recent-item .recent-title{color:var(--ink);font-weight:800;margin-left:4px}
 /* 반짝임 효과 */
-@keyframes flashBar{0%,100%{filter:brightness(1)}50%{filter:brightness(3) saturate(0)}}
-.promo-bar.flash{animation:flashBar .25s ease-in-out 2}
+@keyframes flashBar{
+  0%   {background:#fff}
+  25%  {background:inherit}
+  50%  {background:#fff}
+  75%  {background:inherit}
+  100% {background:inherit}
+}
+.promo-bar.flash{animation:flashBar 1.6s ease-in-out 1;background-color:#fff}
   
 @media(max-width:860px){.app{padding:16px}.topbar{grid-template-columns:1fr}.controls{justify-content:flex-start}.dashboard-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:1fr}}
 @media(max-width:560px){.dashboard-strip{grid-template-columns:1fr}}
@@ -389,10 +395,16 @@ function goToPromotion(p){
       // 첫 번째 바로 스크롤 (좌우+상하 모두 보이게)
       bars[0].scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
     }
-    bars.forEach(b=>{
-      b.classList.add('flash');
-      setTimeout(()=>b.classList.remove('flash'),600);
-    });
+bars.forEach(b=>{
+  const orig=b.style.background;
+  b.style.background='';                    // inline 일시 제거
+  b.dataset.origBg=orig;
+  b.classList.add('flash');
+  setTimeout(()=>{
+    b.classList.remove('flash');
+    b.style.background=b.dataset.origBg;    // 원래 색 복원
+  },1700);
+});
   },100);
 }
   
