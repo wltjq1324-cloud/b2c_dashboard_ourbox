@@ -35,18 +35,18 @@ h1{margin:0;font-size:clamp(26px,3vw,40px);line-height:1.1}
 .metric-note{margin-top:6px;color:var(--muted);font-size:12px}
 
 .calendar-shell{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}
-.calendar-grid{min-width:1280px;display:grid;grid-template-columns:repeat(7,minmax(132px,1fr)) 240px}
+.calendar-grid{min-width:900px;display:grid;grid-template-columns:repeat(7,minmax(92px,1fr)) 170px}
 .day-header,.week-header{position:sticky;top:0;z-index:2;min-height:44px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fbfcfe;padding:12px 10px;font-size:13px;font-weight:900;text-align:center}
 .week-header{border-right:0;background:#eef6f8;color:var(--brand-dark)}
-.day-cell{min-height:180px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;padding:8px 2px 8px 8px;position:relative;overflow:visible}
+.day-cell{min-height:130px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;padding:5px 2px 5px 6px;position:relative;overflow:visible}
 .day-cell:hover{background:#fafcfd}
 .day-cell.outside{background:#f2f4f7;color:#98a2b3}
 .day-cell.today .date-number{background:var(--brand);color:#fff}
 .date-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.date-number{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:900}
+.date-number{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:900}
 
-.promo-slot{height:34px;margin:2px 0;position:relative}
-.promo-bar{position:absolute;top:3px;bottom:3px;left:0;right:4px;border-radius:6px;padding:0 8px;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#fff;cursor:pointer;overflow:hidden;white-space:nowrap;transition:filter .15s}
+.promo-slot{height:24px;margin:1px 0;position:relative}
+.promo-bar{position:absolute;top:2px;bottom:2px;left:0;right:3px;border-radius:5px;padding:0 6px;display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:#fff;cursor:pointer;overflow:hidden;white-space:nowrap;transition:filter .15s}
 .promo-bar:hover{filter:brightness(1.12)}
 .promo-bar.start{border-radius:6px 0 0 6px;right:-2px}
 .promo-bar.middle{border-radius:0;left:-2px;right:-2px}
@@ -54,15 +54,13 @@ h1{margin:0;font-size:clamp(26px,3vw,40px);line-height:1.1}
 .promo-bar.single{border-radius:6px}
 .promo-bar.start.end{border-radius:6px;right:4px}
 .bar-title{flex:1;overflow:hidden;text-overflow:ellipsis}
-.bar-qty{font-size:11px;opacity:.85;flex-shrink:0}
+.bar-qty{font-size:9.5px;opacity:.85;flex-shrink:0}
 
-.week-total{min-height:180px;border-bottom:1px solid var(--line);background:#f2faf9;padding:12px;font-size:12px;line-height:1.45;overflow-y:auto;max-height:380px}
-.week-total-head{font-weight:900;color:var(--brand-dark);font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.week-total-sum{color:var(--brand-dark);font-weight:900;font-size:15px}
-.week-promo{margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed #d3e3e6}
-.week-promo:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
-.week-promo-name{font-weight:800;color:var(--ink);margin-bottom:3px;font-size:12px}
-.week-promo-sku{color:var(--muted);font-size:11.5px;line-height:1.5;padding-left:4px}
+.week-total{min-height:130px;border-bottom:1px solid var(--line);background:#f2faf9;padding:8px;font-size:10.5px;line-height:1.4;overflow-y:auto;max-height:300px}
+.week-total-head{font-size:11.5px}
+.week-total-sum{font-size:13px}
+.week-promo-name{font-size:11px}
+.week-promo-sku{font-size:10.5px}
 .week-total-empty{color:var(--muted);font-size:12px}
 
 /* 모달 */
@@ -115,8 +113,8 @@ textarea{min-height:80px;resize:vertical}
 .recent-item .recent-date{color:var(--muted);font-weight:700}
 .recent-item .recent-title{color:var(--ink);font-weight:800;margin-left:4px}
 /* 반짝임 효과 */
-@keyframes flashBar{0%,100%{filter:brightness(1);box-shadow:none}50%{filter:brightness(1.4);box-shadow:0 0 0 3px rgba(255,200,0,0.6)}}
-.promo-bar.flash{animation:flashBar .6s ease 2}
+@keyframes flashBar{0%,100%{background-color:inherit;color:#fff}50%{background-color:#fff !important;color:#fff}}
+.promo-bar.flash{animation:flashBar .35s ease 2}
   
 @media(max-width:860px){.app{padding:16px}.topbar{grid-template-columns:1fr}.controls{justify-content:flex-start}.dashboard-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:1fr}}
 @media(max-width:560px){.dashboard-strip{grid-template-columns:1fr}}
@@ -380,23 +378,20 @@ function renderMetrics(){
   });
 }
 function goToPromotion(p){
-  // 해당 프로모션 시작 월로 이동
   const startD=parseKey(p.start_date);
   state.visibleDate=new Date(startD.getFullYear(),startD.getMonth(),1);
   renderAll();
-  // 렌더 직후 해당 프로모션 모든 바에 반짝임 효과
   setTimeout(()=>{
-    document.querySelectorAll('.promo-bar').forEach(bar=>{
-      // 바 안의 title 텍스트로 매칭 (시작 또는 주 시작에만 title 표시되므로 보강)
-      const onclick=bar.onclick;
-      // 더 안전한 방법: data 속성으로 매칭
-    });
-    // data-id 기반 매칭으로 다시 시도
-    document.querySelectorAll(`[data-promo-id="${p.id}"]`).forEach(b=>{
+    const bars=document.querySelectorAll(`[data-promo-id="${p.id}"]`);
+    if(bars.length){
+      // 첫 번째 바로 스크롤 (좌우+상하 모두 보이게)
+      bars[0].scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+    }
+    bars.forEach(b=>{
       b.classList.add('flash');
       setTimeout(()=>b.classList.remove('flash'),1500);
     });
-  },50);
+  },100);
 }
   
 function renderCalendar(){
