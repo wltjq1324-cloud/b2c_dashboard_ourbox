@@ -158,6 +158,42 @@ textarea{min-height:80px;resize:vertical}
   75%{background:var(--flash-color,#039be5)}
   100%{background:var(--flash-color,#039be5)}
 }
+
+.access-gate{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.52);padding:20px}
+.access-box{width:min(420px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 80px rgba(15,23,42,.28);padding:24px}
+.access-box h2{margin:0 0 8px;font-size:22px}
+.access-box p{margin:0 0 16px;color:var(--muted);line-height:1.5}
+.access-code-row{display:flex;gap:8px}
+.access-code-row input{flex:1}
+.access-error{display:none;margin-top:10px;color:var(--red);font-size:13px;font-weight:800}
+.access-help{margin-top:12px;color:var(--muted);font-size:12px;line-height:1.5}
+.role-external .dashboard-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+.role-external .dashboard-strip .metric:nth-child(4){display:none}
+.role-external .recent-item{cursor:default}
+.role-external .price-row,
+.role-external .sku-total-row div:nth-child(2){display:none!important}
+.role-external .promo-bar{cursor:default}
+.role-internal #newPromotionButton,
+.role-external #newPromotionButton{display:none!important}
+.role-internal #submitButton,
+.role-internal #deleteButton,
+.role-internal #addSkuRowBtn,
+.role-internal .sku-add-bundle,
+.role-internal .sku-item-remove,
+.role-internal .sku-qty-btn,
+.role-internal .sku-qty-reset,
+.role-internal .sku-row-remove{display:none!important}
+.role-external #submitButton,
+.role-external #deleteButton,
+.role-external #addSkuRowBtn,
+.role-external .sku-add-bundle,
+.role-external .sku-item-remove,
+.role-external .sku-qty-btn,
+.role-external .sku-qty-reset,
+.role-external .sku-row-remove{display:none!important}
+.readonly-note{display:none;margin:0 20px 0;padding:10px 12px;border-radius:8px;background:#eef6f8;color:var(--brand-dark);font-size:13px;font-weight:800}
+.role-internal .readonly-note{display:block}
+
 .promo-bar.flash{animation:flashBar 1.2s ease-in-out 1}
 @media(max-width:860px){.app{padding:16px}.topbar{grid-template-columns:1fr}.controls{justify-content:flex-start}.dashboard-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:1fr}}
 @media(max-width:560px){.dashboard-strip{grid-template-columns:1fr}}
@@ -166,6 +202,20 @@ textarea{min-height:80px;resize:vertical}
 <body>
 <div class="loading" id="loading">데이터 불러오는 중...</div>
 <div class="saving-overlay" id="savingOverlay"><div class="saving-box">⏳ 저장 중입니다...</div></div>
+
+<div class="access-gate" id="accessGate">
+  <div class="access-box">
+    <h2>접속 코드 입력</h2>
+    <p>권한별 코드 입력 후 캘린더를 확인합니다.</p>
+    <div class="access-code-row">
+      <input id="accessCodeInput" type="password" placeholder="접속 코드">
+      <button class="primary-button" id="accessCodeButton" type="button">확인</button>
+    </div>
+    <div class="access-error" id="accessError">접속 코드가 올바르지 않습니다.</div>
+    <div class="access-help">편집자 / 내부 뷰어 / 3PL 부분뷰어 권한으로 구분됩니다.</div>
+  </div>
+</div>
+
 
 <main class="app" style="display:none" id="mainApp">
 <section class="topbar">
@@ -178,7 +228,8 @@ textarea{min-height:80px;resize:vertical}
     <button class="month-control" id="prevMonth">‹</button>
     <strong class="role-pill" id="currentMonthLabel">-</strong>
     <button class="month-control" id="nextMonth">›</button>
-    <span class="role-pill">편집 권한: MD/마케팅</span>
+    <span class="role-pill" id="roleLabel">권한 확인 전</span>
+    <button class="ghost-button" id="changeAccessButton" type="button" style="display:none">권한 변경</button>
     <button class="primary-button" id="newPromotionButton">프로모션 등록</button>
   </div>
 </section>
@@ -220,6 +271,7 @@ textarea{min-height:80px;resize:vertical}
     <h2 id="modalTitle">프로모션 등록</h2>
     <button class="close-button" id="closeModalButton">×</button>
   </div>
+  <p class="readonly-note">읽기 전용 권한입니다. 수정/저장은 편집자만 가능합니다.</p>
   <form id="promotionForm">
     <input type="hidden" id="editingId">
     <div class="form-grid">
@@ -255,7 +307,44 @@ textarea{min-height:80px;resize:vertical}
 
 <script>
 const API   = 'https://script.google.com/macros/s/AKfycbwama99AMKAZK_vxJkFf7PnxyTgd0t_INjMheflr2oR3zIoCeSQAoedsr9XlUWaipGFPw/exec';
-const ROLE  = 'edit';
+
+const ACCESS_CODES = {
+  'batt1204': 'edit',
+  'batt1111': 'internal',
+  'ourbox123': 'external'
+};
+
+// 부분뷰어(3PL 외부 공개)에서 숨길 담당자
+const EXTERNAL_HIDDEN_OWNERS = ['김슬기'];
+
+const ROLE_CONFIG = {
+  edit: {
+    label: '편집 권한: MD/마케팅',
+    title: '월간 프로모션 운영 캘린더',
+    subcopy: 'MD/마케팅 등록 기준으로 CS, 물류, 생산이 같은 화면에서 프로모션 기간과 예상 출고 부담을 확인합니다.',
+    canEdit: true,
+    canOpenDetail: true,
+    showPrice: true
+  },
+  internal: {
+    label: '뷰어 권한: 회사 임직원',
+    title: '월간 프로모션 운영 캘린더',
+    subcopy: '회사 내부 공유용 읽기 전용 화면입니다. 수정/저장은 MD 편집자만 가능합니다.',
+    canEdit: false,
+    canOpenDetail: true,
+    showPrice: true
+  },
+  external: {
+    label: '부분뷰어 권한: 3PL 물류센터',
+    title: '월간 출고 예정 캘린더',
+    subcopy: '외부 물류센터 공유용 화면입니다. 출고 일정, SKU 구성, 예상 수량만 확인합니다.',
+    canEdit: false,
+    canOpenDetail: false,
+    showPrice: false
+  }
+};
+
+let ROLE = localStorage.getItem('ourboxCalendarRole') || '';
 const USER  = 'MD';
 const COLORS = ['#e53935','#f4511e','#f6bf26','#33b679','#039be5','#3f51b5','#8e24aa'];
 const MAX_ROWS = 10;
@@ -269,6 +358,51 @@ let state = {
   priceMap: {}
 };
 let isSaving = false;
+
+function getRoleConfig(){return ROLE_CONFIG[ROLE] || ROLE_CONFIG.external}
+function isEditRole(){return getRoleConfig().canEdit}
+
+function applyRoleUI(){
+  const cfg=getRoleConfig();
+  document.body.classList.remove('role-edit','role-internal','role-external');
+  document.body.classList.add('role-'+ROLE);
+  document.querySelector('.topbar h1').textContent=cfg.title;
+  document.querySelector('.subcopy').textContent=cfg.subcopy;
+  document.getElementById('roleLabel').textContent=cfg.label;
+  document.getElementById('newPromotionButton').style.display=cfg.canEdit?'':'none';
+  document.getElementById('changeAccessButton').style.display='';
+}
+
+function showAccessGate(){
+  document.getElementById('loading').style.display='none';
+  document.getElementById('mainApp').style.display='none';
+  document.getElementById('accessGate').style.display='flex';
+  document.getElementById('accessCodeInput').focus();
+}
+
+function handleAccessCode(){
+  const code=document.getElementById('accessCodeInput').value.trim();
+  const role=ACCESS_CODES[code];
+  if(!role){
+    document.getElementById('accessError').style.display='block';
+    return;
+  }
+  ROLE=role;
+  localStorage.setItem('ourboxCalendarRole',ROLE);
+  document.getElementById('accessGate').style.display='none';
+  document.getElementById('loading').style.display='';
+  init();
+}
+
+function setModalReadonly(readonly){
+  document.querySelectorAll('#promotionForm input, #promotionForm select, #promotionForm textarea').forEach(node=>{
+    if(node.id==='editingId')return;
+    node.disabled=readonly;
+  });
+  document.getElementById('submitButton').style.display=readonly?'none':'';
+  document.getElementById('deleteButton').style.display=readonly?'none':document.getElementById('deleteButton').style.display;
+}
+
 
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function num(v){return Number(v||0).toLocaleString('ko-KR')}
@@ -305,6 +439,9 @@ async function loadData(){
   const data=await res.json();
   if(data.error)throw new Error(data.error);
   state.promotions=data.promotions||[];
+  if(ROLE==='external'){
+    state.promotions=state.promotions.filter(p=>!EXTERNAL_HIDDEN_OWNERS.includes(String(p.owner||'').trim()));
+  }
   state.products=(data.products||[]).map(p=>p.name||p);
   state.priceMap={};
   (data.products||[]).forEach(p=>{if(p.name)state.priceMap[p.name]=p.price||0;});
@@ -351,9 +488,15 @@ function renderActionStrip(){
   const ending=state.promotions.filter(p=>p.end_date===today);
   const upcoming=state.promotions.filter(p=>p.start_date>today&&p.start_date<=d3);
   const msgs=[];
-  if(starting.length)msgs.push(`오늘 시작 <em>${starting.map(p=>p.title).join(', ')}</em>`);
-  if(ending.length)msgs.push(`오늘 마감 <em>${ending.map(p=>p.title).join(', ')}</em>`);
-  if(upcoming.length)msgs.push(`D-3 이내: <em>${upcoming.map(p=>p.title).join(', ')}</em>`);
+  if(ROLE==='external'){
+    if(starting.length)msgs.push(`오늘 출고 시작 <em>${starting.length}건</em>`);
+    if(ending.length)msgs.push(`오늘 출고 마감 <em>${ending.length}건</em>`);
+    if(upcoming.length)msgs.push(`D-3 이내 출고 예정 <em>${upcoming.length}건</em>`);
+  }else{
+    if(starting.length)msgs.push(`오늘 시작 <em>${starting.map(p=>p.title).join(', ')}</em>`);
+    if(ending.length)msgs.push(`오늘 마감 <em>${ending.map(p=>p.title).join(', ')}</em>`);
+    if(upcoming.length)msgs.push(`D-3 이내: <em>${upcoming.map(p=>p.title).join(', ')}</em>`);
+  }
   const strip=document.getElementById('actionStrip');
   if(msgs.length){strip.style.display='';document.getElementById('actionContent').innerHTML=msgs.join(' &nbsp;|&nbsp; ')}
   else strip.style.display='none';
@@ -381,7 +524,7 @@ function renderMetrics(){
     const ts=document.createElement('span');ts.className='recent-title';ts.textContent=`[${p.title}]`;
     item.appendChild(ds);item.appendChild(ts);
     item.title=p.title;
-    item.onclick=()=>goToPromotion(p);
+    if(ROLE!=='external') item.onclick=()=>goToPromotion(p);
     listEl.appendChild(item);
   });
 }
@@ -449,10 +592,16 @@ function renderCalendar(){
         bar.className=`promo-bar ${posClass}`;
         bar.style.background=color;
         bar.dataset.promoId=p.id;
-        bar.onclick=()=>openEditModal(p);
+        if(getRoleConfig().canOpenDetail){
+          bar.onclick=()=>openEditModal(p);
+        }else{
+          bar.onclick=null;
+          bar.title='부분뷰어는 상세 팝업을 열 수 없습니다.';
+        }
         if(isStart||isWeekStart){
           const qty=totalQtyFromStr(p.product_name);
-          bar.appendChild(el('span','bar-title',p.title));
+          const titleText=ROLE==='external' ? '출고 예정' : p.title;
+          bar.appendChild(el('span','bar-title',titleText));
           if(qty)bar.appendChild(el('span','bar-qty',num(qty)+'개'));
         }
         slot.appendChild(bar);
@@ -473,7 +622,7 @@ function renderCalendar(){
         const skus=getPromoSkuInWeek(p,week);
         if(!skus||!skus.length)return;
         const pb=el('div','week-promo');
-        pb.appendChild(el('div','week-promo-name','['+p.title+']'));
+        pb.appendChild(el('div','week-promo-name',ROLE==='external'?'[출고 항목]':'['+p.title+']'));
         skus.forEach(s=>pb.appendChild(el('div','week-promo-sku','· '+formatSkuLine(s))));
         box.appendChild(pb);
       });
@@ -680,6 +829,8 @@ function collectSkuRows(){
 // ===== 모달 =====
 const modalEl=document.getElementById('modalBackdrop');
 function openNewModal(){
+  if(!isEditRole()){alert('편집자 권한에서만 등록할 수 있습니다.');return}
+  setModalReadonly(false);
   document.getElementById('modalTitle').textContent='프로모션 등록';
   document.getElementById('editingId').value='';
   document.getElementById('promotionForm').reset();
@@ -690,7 +841,10 @@ function openNewModal(){
   modalEl.classList.add('open');
 }
 function openEditModal(p){
-  document.getElementById('modalTitle').textContent='프로모션 수정';
+  if(!getRoleConfig().canOpenDetail)return;
+  const readonly=!isEditRole();
+  setModalReadonly(readonly);
+  document.getElementById('modalTitle').textContent=readonly?'프로모션 상세':'프로모션 수정';
   document.getElementById('editingId').value=p.id;
   document.getElementById('titleInput').value=p.title;
   document.getElementById('startDateInput').value=p.start_date;
@@ -711,11 +865,13 @@ document.getElementById('cancelButton').onclick=closeModal;
 document.getElementById('prevMonth').onclick=()=>{state.visibleDate.setMonth(state.visibleDate.getMonth()-1);renderAll()};
 document.getElementById('nextMonth').onclick=()=>{state.visibleDate.setMonth(state.visibleDate.getMonth()+1);renderAll()};
 document.getElementById('addSkuRowBtn').onclick=()=>{
+  if(!isEditRole()){alert('편집자 권한에서만 행을 추가할 수 있습니다.');return}
   if(document.querySelectorAll('.sku-row').length>=MAX_ROWS){alert('행은 최대 10개입니다.');return}
   document.getElementById('skuRows').appendChild(makeSkuRow());
   renumberSkuRows();
 };
 document.getElementById('deleteButton').onclick=async()=>{
+  if(!isEditRole()){alert('편집자 권한에서만 삭제할 수 있습니다.');return}
   if(isSaving)return;
   if(!confirm('정말 삭제하시겠습니까?'))return;
   isSaving=true;
@@ -727,6 +883,7 @@ document.getElementById('deleteButton').onclick=async()=>{
 };
 document.getElementById('promotionForm').onsubmit=async(e)=>{
   e.preventDefault();
+  if(!isEditRole()){alert('편집자 권한에서만 저장할 수 있습니다.');return}
   if(isSaving)return;
   const rows=collectSkuRows();
   if(!rows.length){alert('SKU 1개 이상 + 수량 입력이 필요합니다.');return}
@@ -753,9 +910,11 @@ document.getElementById('promotionForm').onsubmit=async(e)=>{
 // ===== 초기화 =====
 async function init(){
   try{
+    applyRoleUI();
     await loadData();
     [['channelInput',state.channels],['ownerInput',state.owners]].forEach(([id,list])=>{
       const sel=document.getElementById(id);
+      sel.innerHTML='';
       list.forEach(v=>{const opt=document.createElement('option');opt.value=opt.textContent=v;sel.appendChild(opt)});
     });
     renderAll();
@@ -765,7 +924,23 @@ async function init(){
     document.getElementById('loading').textContent='오류: '+err.message;
   }
 }
-init();
+document.getElementById('accessCodeButton').onclick=handleAccessCode;
+document.getElementById('accessCodeInput').addEventListener('keydown',e=>{if(e.key==='Enter')handleAccessCode()});
+document.getElementById('changeAccessButton').onclick=()=>{
+  localStorage.removeItem('ourboxCalendarRole');
+  ROLE='';
+  document.getElementById('accessCodeInput').value='';
+  document.getElementById('accessError').style.display='none';
+  showAccessGate();
+};
+
+if(ROLE_CONFIG[ROLE]){
+  document.getElementById('accessGate').style.display='none';
+  init();
+}else{
+  localStorage.removeItem('ourboxCalendarRole');
+  showAccessGate();
+}
 </script>
 </body>
 </html>
