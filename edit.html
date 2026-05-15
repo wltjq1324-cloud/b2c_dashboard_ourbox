@@ -361,6 +361,9 @@ let isSaving = false;
 
 function getRoleConfig(){return ROLE_CONFIG[ROLE] || ROLE_CONFIG.external}
 function isEditRole(){return getRoleConfig().canEdit}
+  function apiRole(){
+  return 'edit';
+}
 
 function applyRoleUI(){
   const cfg=getRoleConfig();
@@ -435,7 +438,7 @@ function assignColors(){
 function getColor(id){return COLORS[state.colorMap[id]??0]}
 
 async function loadData(){
-  const res=await fetch(`${API}?action=load&role=${ROLE}`);
+  const res=await fetch(`${API}?action=load&role=${apiRole()}`);
   const data=await res.json();
   if(data.error)throw new Error(data.error);
   state.promotions=data.promotions||[];
@@ -877,7 +880,7 @@ document.getElementById('deleteButton').onclick=async()=>{
   isSaving=true;
   const id=document.getElementById('editingId').value;
   closeModal();showSaving();
-  try{await apiPost({action:'delete',role:ROLE,id});await loadData();renderAll()}
+  try{await apiPost({action:'delete',role:apiRole(),id});await loadData();renderAll()}
   catch(err){alert('삭제 실패: '+err.message)}
   finally{isSaving=false;hideSaving()}
 };
@@ -902,7 +905,7 @@ document.getElementById('promotionForm').onsubmit=async(e)=>{
   };
   if(data.start_date>data.end_date){alert('종료일은 시작일 이후여야 합니다.');return}
   isSaving=true;closeModal();showSaving();
-  try{await apiPost({action:'upsert',role:ROLE,data});await loadData();renderAll()}
+  try{await apiPost({action:'upsert',role:apiRole(),data});await loadData();renderAll()}
   catch(err){alert('저장 실패: '+err.message)}
   finally{isSaving=false;hideSaving()}
 };
