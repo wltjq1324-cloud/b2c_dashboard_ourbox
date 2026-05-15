@@ -94,7 +94,19 @@ textarea{min-height:80px;resize:vertical}
 .sku-row-remove:hover{border-color:var(--red);color:var(--red);background:#fff5f5}
 .sku-add-row{margin-top:8px;border:2px dashed var(--line);border-radius:8px;background:#fff;color:var(--muted);font-weight:700;padding:10px;font-size:13px;width:100%}
 .sku-add-row:hover{border-color:var(--brand);color:var(--brand)}
-.sku-total-row{margin-top:10px;padding:10px;background:#eef6f8;border-radius:6px;color:var(--brand-dark);font-size:13px;font-weight:800;text-align:right}
+.sku-total-row{
+  margin-top:10px;
+  padding:10px 14px;
+  background:#eef6f8;
+  border-radius:6px;
+  color:var(--brand-dark);
+  font-size:13px;
+  font-weight:800;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  align-items:flex-end;
+}
 .saving-overlay{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.28)}
 .saving-overlay.open{display:flex}
 .saving-box{background:#fff;border-radius:8px;padding:18px 32px;box-shadow:var(--shadow);font-weight:700;color:var(--brand-dark)}
@@ -223,7 +235,10 @@ textarea{min-height:80px;resize:vertical}
         </div>
         <div class="sku-rows" id="skuRows"></div>
         <button class="sku-add-row" id="addSkuRowBtn" type="button">+ 행 추가</button>
-        <div class="sku-total-row">합계: <span id="skuTotalDisplay">0</span>개</div>
+        <div class="sku-total-row">
+  <div>합계 수량: <span id="skuTotalDisplay">0</span>개</div>
+  <div>판매가 합계: <span id="skuSalesTotalDisplay">0</span>원</div>
+</div>
       </div>
       <label class="full">운영 메모<textarea id="memoInput" placeholder="CS/물류/생산이 알아야 할 내용 (특정일 출고 집중, 사은품, 합포장 주의사항 등)"></textarea></label>
     </div>
@@ -469,13 +484,32 @@ function renderCalendar(){
 
 function renderAll(){renderActionStrip();renderMetrics();renderCalendar()}
 
+  function calcSkuSalesTotal(){
+  let total = 0;
+
+  document.querySelectorAll('.sku-row').forEach(r=>{
+    const qty = Number(r.querySelector('.sku-qty-display').textContent) || 0;
+    const price = Number(r.querySelector('.price-input')?.value) || 0;
+    total += qty * price;
+  });
+
+  return total;
+}
+  
 // ===== SKU UI =====
 function calcSkuTotal(){
   let total=0;
+
   document.querySelectorAll('.sku-row').forEach(r=>{
-    total+=Number(r.querySelector('.sku-qty-display').textContent)||0;
+    total += Number(r.querySelector('.sku-qty-display').textContent) || 0;
   });
-  document.getElementById('skuTotalDisplay').textContent=num(total);
+
+  document.getElementById('skuTotalDisplay').textContent = num(total);
+
+  const salesEl = document.getElementById('skuSalesTotalDisplay');
+  if(salesEl){
+    salesEl.textContent = num(calcSkuSalesTotal());
+  }
 }
 
 function makeBundleSelect(value='',onchange=null){
@@ -577,7 +611,10 @@ priceInput.type='number';
 priceInput.min='0';
 priceInput.placeholder='0';
 if(rowData.price)priceInput.value=rowData.price;
-priceInput.oninput=updatePrice;
+priceInput.oninput=()=>{
+  updatePrice();
+  calcSkuTotal();
+};
 
 inputWrap.appendChild(priceInput);
 inputWrap.appendChild(el('span','','원'));
