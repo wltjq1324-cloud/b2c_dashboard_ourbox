@@ -516,10 +516,11 @@ function calcSkuTotal(){
 }
 
 function makeBundleSelect(value='', onchange=null){
-  const wrap=document.createElement('div');
+  const wrap=document.createElement('span');
   wrap.style.display='flex';
   wrap.style.alignItems='center';
   wrap.style.gap='4px';
+  wrap.style.flexShrink='0';
 
   const sel=document.createElement('select');
   sel.className='sku-item-select';
