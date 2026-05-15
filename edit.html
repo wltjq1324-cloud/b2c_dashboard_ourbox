@@ -517,33 +517,32 @@ function calcSkuTotal(){
 
 function makeBundleSelect(value='', onchange=null){
   const wrap=document.createElement('span');
-  wrap.style.display='flex';
-  wrap.style.alignItems='center';
-  wrap.style.gap='4px';
-  wrap.style.flexShrink='0';
+  wrap.style.cssText='display:inline-flex;align-items:center;gap:4px;flex-shrink:0';
 
   const sel=document.createElement('select');
   sel.className='sku-item-select';
-  const empty=document.createElement('option');empty.value='';empty.textContent='-- 품목 선택 --';sel.appendChild(empty);
+  const empty=document.createElement('option');
+  empty.value='';empty.textContent='-- 품목 선택 --';
+  sel.appendChild(empty);
   state.products.forEach(p=>{
-    const opt=document.createElement('option');opt.value=opt.textContent=p;
+    const opt=document.createElement('option');
+    opt.value=opt.textContent=p;
     if(p===value)opt.selected=true;
     sel.appendChild(opt);
   });
-  if(onchange)sel.onchange=onchange;
+  sel.onchange=()=>{ if(onchange)onchange(); };
   wrap.appendChild(sel);
 
-  // 첫 묶음 외 삭제 버튼
   const rm=el('button','sku-item-remove','×');rm.type='button';
   rm.onclick=()=>{
-    const items=wrap.parentElement.querySelectorAll('.sku-item-select');
-    if(items.length<=1){alert('최소 1개 품목은 필요합니다.');return}
-    // 플러스 기호도 함께 처리: 앞 또는 뒤 + 제거
+    const sels=wrap.parentElement.querySelectorAll('.sku-item-select');
+    if(sels.length<=1){alert('최소 1개 품목은 필요합니다.');return}
     const prev=wrap.previousElementSibling;
     const next=wrap.nextElementSibling;
     if(prev&&prev.classList.contains('sku-item-plus'))prev.remove();
     else if(next&&next.classList.contains('sku-item-plus'))next.remove();
     wrap.remove();
+    if(onchange)onchange();
   };
   wrap.appendChild(rm);
   return wrap;
@@ -555,7 +554,6 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   row.appendChild(numEl);
 
   const items=el('div','sku-items');
-  const itemList=rowData.items.length?rowData.items:[''];
 
   function updatePrice(){
     const sels=items.querySelectorAll('.sku-item-select');
@@ -587,24 +585,77 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
     }
   }
 
+  // 초기 품목 렌더
+  const itemList=rowData.items.length?rowData.items:[''];
   itemList.forEach((v,i)=>{
     if(i>0)items.appendChild(el('span','sku-item-plus','+'));
-    const wrap=makeBundleSelect(v, updatePrice);
-    items.appendChild(wrap);
+    items.appendChild(makeBundleSelect(v, updatePrice));
   });
 
-  const addBundleBtn=el('button','sku-add-bundle','+ 묶음 추가');addBundleBtn.type='button';
+  // + 묶음 추가
+  const addBundleBtn=el('button','sku-add-bundle','+ 묶음 추가');
+  addBundleBtn.type='button';
   addBundleBtn.onclick=()=>{
     const cnt=items.querySelectorAll('.sku-item-select').length;
     if(cnt>=MAX_BUNDLE){alert('한 행에 묶음은 최대 5개입니다.');return}
     items.insertBefore(el('span','sku-item-plus','+'),addBundleBtn);
-    const wrap=makeBundleSelect('',updatePrice);
-    items.insertBefore(wrap,addBundleBtn);
+    items.insertBefore(makeBundleSelect('',updatePrice),addBundleBtn);
     updatePrice();
   };
   items.appendChild(addBundleBtn);
   row.appendChild(items);
 
+  // 정상가·판매가·할인율
+  const priceRow=el('div','price-row');
+  const baseEl=el('span','price-base','정상가: -');
+  const calcEl=el('span','price-base-calc','');
+  const inputWrap=el('div','price-input-wrap');
+  const priceLabel=el('span','','판매가: ');
+  const priceInput=document.createElement('input');
+  priceInput.className='price-input';
+  priceInput.type='number';
+  priceInput.min='0';
+  priceInput.placeholder='0';
+  if(rowData.price)priceInput.value=rowData.price;
+  priceInput.oninput=updatePrice;
+  const priceUnit=el('span','','원');
+  const rateEl=el('span','price-rate','할인율: -');
+  inputWrap.appendChild(priceLabel);
+  inputWrap.appendChild(priceInput);
+  inputWrap.appendChild(priceUnit);
+  priceRow.appendChild(baseEl);
+  priceRow.appendChild(calcEl);
+  priceRow.appendChild(inputWrap);
+  priceRow.appendChild(rateEl);
+  row.appendChild(priceRow);
+
+  // 수량
+  const qtyGroup=el('div','sku-qty-group');
+  const qtyDisp=el('div','sku-qty-display',String(Number(rowData.qty)||0));
+  const btn100=el('button','sku-qty-btn','+100');btn100.type='button';
+  const btn500=el('button','sku-qty-btn','+500');btn500.type='button';
+  const btnReset=el('button','sku-qty-reset','초기화');btnReset.type='button';
+  btn100.onclick=()=>{qtyDisp.textContent=String(Number(qtyDisp.textContent)+100);calcSkuTotal()};
+  btn500.onclick=()=>{qtyDisp.textContent=String(Number(qtyDisp.textContent)+500);calcSkuTotal()};
+  btnReset.onclick=()=>{qtyDisp.textContent='0';calcSkuTotal()};
+  qtyGroup.appendChild(qtyDisp);
+  qtyGroup.appendChild(btn100);
+  qtyGroup.appendChild(btn500);
+  qtyGroup.appendChild(btnReset);
+  row.appendChild(qtyGroup);
+
+  // 행 삭제
+  const rmRow=el('button','sku-row-remove','행 삭제');rmRow.type='button';
+  rmRow.onclick=()=>{
+    const rows=document.querySelectorAll('.sku-row');
+    if(rows.length<=1){alert('최소 1개 행은 필요합니다.');return}
+    row.remove();renumberSkuRows();calcSkuTotal();
+  };
+  row.appendChild(rmRow);
+
+  setTimeout(updatePrice,0);
+  return row;
+}
   // 정상가·판매가·할인율 행
   const priceRow=el('div','price-row');
   const baseEl=el('span','price-base','정상가: -');
