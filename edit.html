@@ -104,13 +104,41 @@ textarea{min-height:80px;resize:vertical}
 .recent-item:hover{color:var(--brand)}
 .recent-item .recent-date{color:var(--muted);font-weight:700}
 .recent-item .recent-title{color:var(--ink);font-weight:800;margin-left:4px}
-.price-row{display:flex;align-items:center;gap:12px;margin:6px 0 8px;font-size:12px;flex-wrap:wrap}
+.price-row{
+  flex:1 1 100%;
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  align-items:center;
+  gap:8px 10px;
+  margin:4px 64px 0 32px;
+  padding-top:2px;
+  font-size:12px;
+}
+
+.price-base-wrap{
+  min-width:0;
+  color:var(--muted);
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .price-base{color:var(--muted);font-weight:700}
 .price-base-calc{color:var(--muted);font-size:10.5px;margin-left:2px}
-.price-input-wrap{display:flex;align-items:center;gap:4px}
+.price-input-wrap{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .price-input{width:90px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-weight:700;text-align:right}
-.price-rate{font-size:12px;font-weight:700;color:var(--muted);min-width:60px}
+.price-rate{font-size:12px;font-weight:700;color:var(--muted);min-width:72px;white-space:nowrap;text-align:right}
 .price-rate.over{color:var(--red);font-weight:900}
+
+@media(max-width:720px){
+  .price-row{
+    margin:6px 0 0 32px;
+    grid-template-columns:1fr;
+    justify-items:start;
+  }
+  .price-rate{text-align:left}
+}
 @keyframes flashBar{
   0%{background:#fff}
   25%{background:var(--flash-color,#039be5)}
@@ -532,20 +560,34 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   row.appendChild(items);
 
   // 정상가·판매가·할인율
-  const priceRow=el('div','price-row');
-  const baseEl=el('span','price-base','정상가: -');
-  const calcEl=el('span','price-base-calc','');
-  const inputWrap=el('div','price-input-wrap');
-  inputWrap.appendChild(el('span','','판매가: '));
-  const priceInput=document.createElement('input');
-  priceInput.className='price-input';priceInput.type='number';priceInput.min='0';priceInput.placeholder='0';
-  if(rowData.price)priceInput.value=rowData.price;
-  priceInput.oninput=updatePrice;
-  inputWrap.appendChild(priceInput);
-  inputWrap.appendChild(el('span','','원'));
-  const rateEl=el('span','price-rate','할인율: -');
-  priceRow.appendChild(baseEl);priceRow.appendChild(calcEl);priceRow.appendChild(inputWrap);priceRow.appendChild(rateEl);
-  row.appendChild(priceRow);
+const priceRow=el('div','price-row');
+
+const baseWrap=el('div','price-base-wrap');
+const baseEl=el('span','price-base','정상가: -');
+const calcEl=el('span','price-base-calc','');
+baseWrap.appendChild(baseEl);
+baseWrap.appendChild(calcEl);
+
+const inputWrap=el('div','price-input-wrap');
+inputWrap.appendChild(el('span','','판매가: '));
+
+const priceInput=document.createElement('input');
+priceInput.className='price-input';
+priceInput.type='number';
+priceInput.min='0';
+priceInput.placeholder='0';
+if(rowData.price)priceInput.value=rowData.price;
+priceInput.oninput=updatePrice;
+
+inputWrap.appendChild(priceInput);
+inputWrap.appendChild(el('span','','원'));
+
+const rateEl=el('span','price-rate','할인율: -');
+
+priceRow.appendChild(baseWrap);
+priceRow.appendChild(inputWrap);
+priceRow.appendChild(rateEl);
+row.appendChild(priceRow);
 
   // 수량
   const qtyGroup=el('div','sku-qty-group');
