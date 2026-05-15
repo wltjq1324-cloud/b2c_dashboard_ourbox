@@ -361,9 +361,7 @@ let isSaving = false;
 
 function getRoleConfig(){return ROLE_CONFIG[ROLE] || ROLE_CONFIG.external}
 function isEditRole(){return getRoleConfig().canEdit}
-  function apiRole(){
-  return 'edit';
-}
+function apiRole(){return 'edit'}
 
 function applyRoleUI(){
   const cfg=getRoleConfig();
@@ -413,6 +411,32 @@ function toKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2
 function parseKey(k){const[y,m,d]=k.split('-').map(Number);return new Date(y,m-1,d)}
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r}
 
+function productLabel(p){
+  if(!p)return '';
+  if(typeof p==='string')return p.trim();
+  if(typeof p==='number')return String(p);
+  return String(
+    p.name ||
+    p['상품명'] ||
+    p.product_name ||
+    p.product ||
+    p.title ||
+    p.item_name ||
+    p.sku ||
+    ''
+  ).trim();
+}
+function productPrice(p){
+  if(!p || typeof p!=='object')return 0;
+  return Number(
+    p.price ||
+    p['정상가'] ||
+    p.normal_price ||
+    p.base_price ||
+    0
+  ) || 0;
+}
+
 function parseSku(str){
   if(!str)return[];
   try{const j=JSON.parse(str);if(Array.isArray(j))return j.filter(r=>r&&Array.isArray(r.items));}catch(e){}
@@ -445,9 +469,17 @@ async function loadData(){
   if(ROLE==='external'){
     state.promotions=state.promotions.filter(p=>!EXTERNAL_HIDDEN_OWNERS.includes(String(p.owner||'').trim()));
   }
-  state.products=(data.products||[]).map(p=>p.name||p);
-  state.priceMap={};
-  (data.products||[]).forEach(p=>{if(p.name)state.priceMap[p.name]=p.price||0;});
+  const rawProducts = data.products || [];
+  state.products = [...new Set(
+    rawProducts
+      .map(productLabel)
+      .filter(Boolean)
+  )];
+  state.priceMap = {};
+  rawProducts.forEach(p=>{
+    const name = productLabel(p);
+    if(name) state.priceMap[name] = productPrice(p);
+  });
   state.channels=data.channels||[];
   state.owners=data.owners||[];
   assignColors();
@@ -671,8 +703,12 @@ function makeBundleSelect(value='',onchange=null){
   sel.className='sku-item-select';
   const empty=document.createElement('option');empty.value='';empty.textContent='-- 품목 선택 --';sel.appendChild(empty);
   state.products.forEach(p=>{
-    const opt=document.createElement('option');opt.value=opt.textContent=p;
-    if(p===value)opt.selected=true;
+    const name = String(p || '').trim();
+    if(!name)return;
+    const opt=document.createElement('option');
+    opt.value=name;
+    opt.textContent=name;
+    if(name===value)opt.selected=true;
     sel.appendChild(opt);
   });
   sel.onchange=()=>{if(onchange)onchange()};
