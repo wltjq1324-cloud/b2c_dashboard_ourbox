@@ -114,6 +114,14 @@ textarea{min-height:80px;resize:vertical}
 .recent-item:hover{color:var(--brand)}
 .recent-item .recent-date{color:var(--muted);font-weight:700}
 .recent-item .recent-title{color:var(--ink);font-weight:800;margin-left:4px}
+.price-row{display:flex;align-items:center;gap:12px;margin:6px 0 8px;font-size:12px;flex-wrap:wrap}
+.price-base{color:var(--muted);font-weight:700}
+.price-base-calc{color:var(--muted);font-size:10.5px;margin-left:2px}
+.price-input-wrap{display:flex;align-items:center;gap:4px}
+.price-input{width:90px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-weight:700;text-align:right}
+.price-rate{font-size:12px;font-weight:700;color:var(--muted);min-width:60px}
+.price-rate.over{color:var(--red);font-weight:900}
+  
 /* 반짝임 효과 */
 @keyframes flashBar{0%,100%{filter:brightness(1)}50%{filter:brightness(3) saturate(0)}}
 .promo-bar.flash{animation:flashBar .25s ease-in-out 2}
@@ -225,7 +233,8 @@ let state = {
   visibleDate: new Date(),
   promotions: [],
   products: [], channels: [], owners: [],
-  colorMap: {}
+  colorMap: {},
+  priceMap: {}   // 품목명 → 정상가
 };
 let isSaving = false;
 
@@ -281,7 +290,11 @@ async function loadData(){
   const data=await res.json();
   if(data.error)throw new Error(data.error);
   state.promotions=data.promotions||[];
-  state.products=data.products||[];
+  state.products = (data.products || []).map(p => p.name || p);
+state.priceMap = {};
+(data.products || []).forEach(p => {
+  if (p.name) state.priceMap[p.name] = p.price || 0;
+});
   state.channels=data.channels||[];
   state.owners=data.owners||[];
   assignColors();
@@ -502,7 +515,7 @@ function calcSkuTotal(){
   document.getElementById('skuTotalDisplay').textContent=num(total);
 }
 
-function makeBundleSelect(value=''){
+function makeBundleSelect(value='', onchange=null){
   const wrap=document.createElement('div');
   wrap.style.display='flex';
   wrap.style.alignItems='center';
@@ -516,6 +529,7 @@ function makeBundleSelect(value=''){
     if(p===value)opt.selected=true;
     sel.appendChild(opt);
   });
+  if(onchange)sel.onchange=onchange;
   wrap.appendChild(sel);
 
   // 첫 묶음 외 삭제 버튼
@@ -534,33 +548,81 @@ function makeBundleSelect(value=''){
   return wrap;
 }
 
-function makeSkuRow(rowData={items:[''],qty:0}){
+function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   const row=el('div','sku-row');
-
-  // 번호 (재계산은 호출부에서)
   const numEl=el('div','sku-row-num','');
   row.appendChild(numEl);
 
-  // 묶음 영역
   const items=el('div','sku-items');
   const itemList=rowData.items.length?rowData.items:[''];
+
+  function updatePrice(){
+    const sels=items.querySelectorAll('.sku-item-select');
+    let baseTotal=0;
+    const parts=[];
+    sels.forEach(s=>{
+      const p=state.priceMap[s.value]||0;
+      baseTotal+=p;
+      if(p)parts.push(num(p));
+    });
+    const baseEl=row.querySelector('.price-base');
+    const calcEl=row.querySelector('.price-base-calc');
+    const rateEl=row.querySelector('.price-rate');
+    const inputEl=row.querySelector('.price-input');
+    if(baseEl){
+      baseEl.textContent=`정상가: ${num(baseTotal)}원`;
+      calcEl.textContent=parts.length>1?`(${parts.join(' + ')})`:'';
+    }
+    if(rateEl&&inputEl){
+      const sale=Number(inputEl.value)||0;
+      if(baseTotal&&sale){
+        const rate=Math.round((baseTotal-sale)/baseTotal*100);
+        rateEl.textContent=`할인율: ${rate}%`;
+        rateEl.className='price-rate'+(rate>=20?' over':'');
+      }else{
+        rateEl.textContent='할인율: -';
+        rateEl.className='price-rate';
+      }
+    }
+  }
+
   itemList.forEach((v,i)=>{
     if(i>0)items.appendChild(el('span','sku-item-plus','+'));
-    items.appendChild(makeBundleSelect(v));
+    const wrap=makeBundleSelect(v, updatePrice);
+    items.appendChild(wrap);
   });
 
-  // + 묶음 추가 버튼
   const addBundleBtn=el('button','sku-add-bundle','+ 묶음 추가');addBundleBtn.type='button';
   addBundleBtn.onclick=()=>{
     const cnt=items.querySelectorAll('.sku-item-select').length;
     if(cnt>=MAX_BUNDLE){alert('한 행에 묶음은 최대 5개입니다.');return}
     items.insertBefore(el('span','sku-item-plus','+'),addBundleBtn);
-    items.insertBefore(makeBundleSelect(),addBundleBtn);
+    const wrap=makeBundleSelect('',updatePrice);
+    items.insertBefore(wrap,addBundleBtn);
+    updatePrice();
   };
   items.appendChild(addBundleBtn);
   row.appendChild(items);
 
-  // 수량 영역
+  // 정상가·판매가·할인율 행
+  const priceRow=el('div','price-row');
+  const baseEl=el('span','price-base','정상가: -');
+  const calcEl=el('span','price-base-calc','');
+  const inputWrap=el('div','price-input-wrap');
+  inputWrap.appendChild(el('span','',`판매가:`));
+  const priceInput=document.createElement('input');
+  priceInput.className='price-input';priceInput.type='number';priceInput.min='0';
+  priceInput.placeholder='0';
+  if(rowData.price)priceInput.value=rowData.price;
+  priceInput.oninput=updatePrice;
+  inputWrap.appendChild(priceInput);
+  inputWrap.appendChild(el('span','','원'));
+  const rateEl=el('span','price-rate','할인율: -');
+  priceRow.appendChild(baseEl);priceRow.appendChild(calcEl);
+  priceRow.appendChild(inputWrap);priceRow.appendChild(rateEl);
+  row.appendChild(priceRow);
+
+  // 수량 행
   const qtyGroup=el('div','sku-qty-group');
   const qtyDisp=el('div','sku-qty-display',String(Number(rowData.qty)||0));
   const btn100=el('button','sku-qty-btn','+100');btn100.type='button';
@@ -572,7 +634,6 @@ function makeSkuRow(rowData={items:[''],qty:0}){
   qtyGroup.appendChild(qtyDisp);qtyGroup.appendChild(btn100);qtyGroup.appendChild(btn500);qtyGroup.appendChild(btnReset);
   row.appendChild(qtyGroup);
 
-  // 행 삭제
   const rmRow=el('button','sku-row-remove','행 삭제');rmRow.type='button';
   rmRow.onclick=()=>{
     const rows=document.querySelectorAll('.sku-row');
@@ -581,6 +642,8 @@ function makeSkuRow(rowData={items:[''],qty:0}){
   };
   row.appendChild(rmRow);
 
+  // 초기 정상가 계산
+  setTimeout(updatePrice,0);
   return row;
 }
 
@@ -607,7 +670,9 @@ function collectSkuRows(){
       if(s.value)items.push(s.value);
     });
     const qty=Number(r.querySelector('.sku-qty-display').textContent)||0;
-    if(items.length&&qty>0)rows.push({items,qty});
+    const priceInput=r.querySelector('.price-input');
+const price=Number(priceInput?.value)||0;
+if(items.length&&qty>0)rows.push({items,qty,price});
   });
   return rows;
 }
