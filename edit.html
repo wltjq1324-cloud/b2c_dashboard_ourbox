@@ -76,6 +76,7 @@ textarea{min-height:80px;resize:vertical}
 .sku-section-label .hint{color:var(--muted);font-weight:600;font-size:12px}
 .sku-rows{display:flex;flex-direction:column;gap:10px}
 .sku-row{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);flex-wrap:wrap}
+.sku-row-wrapper{width:100%}
 .sku-row-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center}
 .sku-items{flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 .sku-item-select{min-width:160px;flex:1}
@@ -479,6 +480,8 @@ function makeBundleSelect(value='',onchange=null){
 }
 
 function makeSkuRow(rowData={items:[''],qty:0,price:0}){
+  const wrapper=el('div','sku-row-wrapper');
+  wrapper.style.cssText='display:flex;flex-direction:column;gap:4px';
   const row=el('div','sku-row');
   const numEl=el('div','sku-row-num','');
   row.appendChild(numEl);
@@ -545,7 +548,7 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   inputWrap.appendChild(el('span','','원'));
   const rateEl=el('span','price-rate','할인율: -');
   priceRow.appendChild(baseEl);priceRow.appendChild(calcEl);priceRow.appendChild(inputWrap);priceRow.appendChild(rateEl);
-  row.appendChild(priceRow);
+  
 
   // 수량
   const qtyGroup=el('div','sku-qty-group');
@@ -567,8 +570,12 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   };
   row.appendChild(rmRow);
 
+  // priceRow를 wrapper에 붙임 (sku-row 밖)
+  wrapper.appendChild(row);
+  wrapper.appendChild(priceRow);
   setTimeout(updatePrice,0);
-  return row;
+  return wrapper;
+}
 }
 
 function renumberSkuRows(){
