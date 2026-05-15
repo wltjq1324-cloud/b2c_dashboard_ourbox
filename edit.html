@@ -496,10 +496,10 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
       baseTotal+=p;
       if(p)parts.push(num(p));
     });
-    const baseEl=row.querySelector('.price-base');
-    const calcEl=row.querySelector('.price-base-calc');
-    const rateEl=row.querySelector('.price-rate');
-    const inputEl=row.querySelector('.price-input');
+const baseEl=wrapper.querySelector('.price-base');
+const calcEl=wrapper.querySelector('.price-base-calc');
+const rateEl=wrapper.querySelector('.price-rate');
+const inputEl=wrapper.querySelector('.price-input');
     if(baseEl){
       baseEl.textContent=`정상가: ${num(baseTotal)}원`;
       calcEl.textContent=parts.length>1?`(${parts.join(' + ')})`:'';
@@ -563,10 +563,10 @@ function makeSkuRow(rowData={items:[''],qty:0,price:0}){
   row.appendChild(qtyGroup);
 
   const rmRow=el('button','sku-row-remove','행 삭제');rmRow.type='button';
-  rmRow.onclick=()=>{
+    rmRow.onclick=()=>{
     const rows=document.querySelectorAll('.sku-row');
     if(rows.length<=1){alert('최소 1개 행은 필요합니다.');return}
-    row.remove();renumberSkuRows();calcSkuTotal();
+    wrapper.remove();renumberSkuRows();calcSkuTotal();
   };
   row.appendChild(rmRow);
 
@@ -595,11 +595,11 @@ function initSkuRows(rows=[]){
 
 function collectSkuRows(){
   const rows=[];
-  document.querySelectorAll('.sku-row').forEach(r=>{
+    document.querySelectorAll('.sku-row-wrapper').forEach(w=>{
     const items=[];
-    r.querySelectorAll('.sku-item-select').forEach(s=>{if(s.value)items.push(s.value)});
-    const qty=Number(r.querySelector('.sku-qty-display').textContent)||0;
-    const price=Number(r.querySelector('.price-input')?.value)||0;
+    w.querySelectorAll('.sku-item-select').forEach(s=>{if(s.value)items.push(s.value)});
+    const qty=Number(w.querySelector('.sku-qty-display').textContent)||0;
+    const price=Number(w.querySelector('.price-input')?.value)||0;
     if(items.length&&qty>0)rows.push({items,qty,price});
   });
   return rows;
