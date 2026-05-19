@@ -31,16 +31,9 @@
 
   html = replaceOrFail(
     html,
-    /<button data-page="manager" onclick="switchPage\('manager'\)"><b>02<\/b>담당자별 성과<\/button>/,
-    "<button data-page=\"manager\" onclick=\"switchPage('manager')\"><b>02</b>담당자별 성과</button>\n      <button data-page=\"productDetail\" onclick=\"switchPage('productDetail')\"><b>03</b>상품별 상세실적</button>",
-    'product detail nav'
-  );
-
-  html = replaceOrFail(
-    html,
-    /<section class="page" id="pageManager">/,
-    "<section class=\"page\" id=\"pageProductDetail\">\n      <section class=\"panel\"><div class=\"panel-head\"><h2>상품별 상세실적</h2><input type=\"search\" id=\"productDetailSearch\" placeholder=\"상품명 검색\" oninput=\"renderProductDetailPage()\" style=\"width:260px;max-width:42vw;height:36px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;padding:0 10px;font-size:13px\"></div><div class=\"table-wrap\" style=\"max-height:620px\"><table id=\"productDetailTable\"></table></div></section>\n    </section>\n\n    <section class=\"page\" id=\"pageManager\">",
-    'product detail page'
+    /<\/section>\s*<section class="grid-2">\s*<div class="panel"><div class="panel-head"><h2>데이터 품질 신호<\/h2>/,
+    "</section>\n      <section class=\"panel\" id=\"productDetailPanel\"><div class=\"panel-head\"><h2>상품별 상세실적</h2><input type=\"search\" id=\"productDetailSearch\" placeholder=\"상품명 검색\" oninput=\"renderProductDetailPage()\" style=\"width:260px;max-width:42vw;height:36px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;padding:0 10px;font-size:13px\"></div><div class=\"table-wrap\" style=\"max-height:620px\"><table id=\"productDetailTable\"></table></div></section>\n      <section class=\"grid-2\">\n        <div class=\"panel\"><div class=\"panel-head\"><h2>데이터 품질 신호</h2>",
+    'product detail inline panel'
   );
 
   html = replaceOrFail(
@@ -107,13 +100,6 @@
 
   html = replaceOrFail(
     html,
-    /function switchPage\(page\)\{currentPage=page; document\.querySelectorAll\('\.page'\)\.forEach\(p=>p\.classList\.toggle\('active',p\.id==='page'\+page\[0\]\.toUpperCase\(\)\+page\.slice\(1\)\)\); document\.querySelectorAll\('\.nav button'\)\.forEach\(b=>b\.classList\.toggle\('active',b\.dataset\.page===page\)\); \$\('pageTitle'\)\.textContent=page==='manager'\?'담당자별 성과':'매출 진척도'; \$\('pageSub'\)\.textContent=page==='manager'\?'채널 담당자 기준 매출, 마진, 주문 추이':'기간별 매출, 목표 달성률, 채널·상품 기여도'; renderAll\(\)\}/,
-    "function switchPage(page){currentPage=page; document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page'+page[0].toUpperCase()+page.slice(1))); document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page)); let meta={overview:['매출 진척도','기간별 매출, 목표 달성률, 채널·상품 기여도'],manager:['담당자별 성과','채널 담당자 기준 매출, 마진, 주문 추이'],productDetail:['상품별 상세실적','전체 옵션 판매 데이터, 검색, 합계']}; $('pageTitle').textContent=(meta[page]||meta.overview)[0]; $('pageSub').textContent=(meta[page]||meta.overview)[1]; renderAll()}",
-    'switch page product detail'
-  );
-
-  html = replaceOrFail(
-    html,
     /let res=await fetch\(API_URL\+'\?t='\+Date\.now\(\),\{cache:'no-store',signal:controller\.signal\}\);/,
     "let joiner=API_URL.indexOf('?')>=0?'&':'?';\n    let res=await fetch(API_URL+joiner+'mode=cache&t='+Date.now(),{cache:'no-store',signal:controller.signal});",
     'cache fetch'
@@ -137,7 +123,7 @@
     html,
     /function renderAll\(\)\{if\(!ALL\.length\)return; refreshFilterOptions\(\); let rows=filtered\(\), target=NUM\(\$\('targetInput'\)\.value\); \$\('rangePill'\)\.textContent=`\$\{\$\('dateFrom'\)\.value\} ~ \$\{\$\('dateTo'\)\.value\}`; renderKpis\(rows,target\); renderCumulative\(rows,target\); renderChannelProgress\(rows,target\); renderDaily\(rows\); renderMoM\(rows\); renderChannelDaily\(rows\); renderProfitStructure\(rows\); renderProduct\(rows\); renderChannelTable\(rows\); renderQuality\(rows\); renderManagerPage\(rows\)\}/,
     "function renderProductDetailPage(){let table=$('productDetailTable'); if(!table)return; let q=(($('productDetailSearch')&&$('productDetailSearch').value)||'').trim().toLowerCase(); let base=productRows(); let entries=[...group(base,'product')].map(([name,rs])=>({name,cat:rs[0]&&rs[0].category||'미분류',orders:orderCount(rs),qty:sum(rs,'qty'),rev:sum(rs,'revenue'),stl:sum(rs,'settlement'),cost:sum(rs,'cost'),mar:sum(rs,'margin')})).filter(e=>!q||String(e.name).toLowerCase().includes(q)||String(e.cat).toLowerCase().includes(q)).sort((a,b)=>b.rev-a.rev); if(!entries.length){emptyTable('productDetailTable','검색 결과 없음');return} let totals=entries.reduce((a,e)=>{a.orders+=e.orders;a.qty+=e.qty;a.rev+=e.rev;a.stl+=e.stl;a.cost+=e.cost;a.mar+=e.mar;return a},{orders:0,qty:0,rev:0,stl:0,cost:0,mar:0}); let body=entries.map(e=>{let rate=e.rev?e.mar/e.rev*100:0; return `<tr><td>${html(e.name)}</td><td>${html(e.cat)}</td><td class=\"r\">${e.orders.toLocaleString('ko-KR')}건</td><td class=\"r\">${e.qty.toLocaleString('ko-KR')}</td><td class=\"r\">${KRW(e.rev)}</td><td class=\"r\">${KRW(e.stl)}</td><td class=\"r\">${KRW(e.cost)}</td><td class=\"r ${e.mar<0?'neg':''}\">${KRW(e.mar)}</td><td class=\"r ${rate<0?'neg':''}\">${rate.toFixed(1)}%</td></tr>`}).join(''); let totalRate=totals.rev?totals.mar/totals.rev*100:0; table.innerHTML=`<thead><tr><th>표준품목명</th><th>상품군</th><th class=\"r\">주문건수</th><th class=\"r\">수량</th><th class=\"r\">매출</th><th class=\"r\">정산액</th><th class=\"r\">원가</th><th class=\"r\">마진</th><th class=\"r\">마진율</th></tr></thead><tbody>${body}<tr style=\"background:#1d3554;color:#fff;font-weight:900\"><td>합계 (${entries.length.toLocaleString('ko-KR')}개 필터)</td><td></td><td class=\"r\">${totals.orders.toLocaleString('ko-KR')}건</td><td class=\"r\">${totals.qty.toLocaleString('ko-KR')}</td><td class=\"r\">${KRW(totals.rev)}</td><td class=\"r\">${KRW(totals.stl)}</td><td class=\"r\">${KRW(totals.cost)}</td><td class=\"r\">${KRW(totals.mar)}</td><td class=\"r\">${totalRate.toFixed(1)}%</td></tr></tbody>`}\n" +
-    "function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderQuality(detailRows.length?detailRows:rows); renderManagerPage(rows); renderProductDetailPage()}",
+    "function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderProductDetailPage(); renderQuality(detailRows.length?detailRows:rows); renderManagerPage(rows)}",
     'renderAll and product detail'
   );
 
