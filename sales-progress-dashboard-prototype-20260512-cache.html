@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>아워박스 세일즈 대시보드 캐시 버전</title>
+  <title>아워박스 대시보드 이전 버전</title>
   <style>
     body{margin:0;background:#f4f6f9;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}
     .boot{min-height:100vh;display:grid;place-items:center}
@@ -12,126 +12,18 @@
   </style>
 </head>
 <body>
-<div class="boot"><div class="card"><div class="title">캐시 대시보드 로딩 중</div><div class="sub">요약 캐시 응답으로 새 화면을 준비합니다.</div></div></div>
+<div class="boot"><div class="card"><div class="title">이전 대시보드 로딩 중</div><div class="sub">루트 교체 전 버전을 불러옵니다.</div></div></div>
 <script>
 (async function(){
-  function replaceOrFail(source, pattern, replacement, label){
-    var next = source.replace(pattern, replacement);
-    if(next === source) throw new Error('패치 실패: ' + label);
-    return next;
-  }
-
-  var response = await fetch('sales-progress-dashboard-prototype-20260512.html?v=' + Date.now(), { cache: 'no-store' });
-  if(!response.ok) throw new Error('원본 HTML 로드 실패: HTTP ' + response.status);
-
-  var html = await response.text();
-
-  html = replaceOrFail(html, /<title>[\s\S]*?<\/title>/, '<title>아워박스 세일즈 대시보드 캐시 버전</title>', 'title');
-  html = replaceOrFail(html, /<h2>일별 매출 리듬<\/h2>/, '<h2>일별 매출 추이</h2>', 'daily chart title');
-
-  html = replaceOrFail(
-    html,
-    /<\/section>\s*<section class="grid-2">\s*<div class="panel"><div class="panel-head"><h2>데이터 품질 신호<\/h2>/,
-    "</section>\n      <section class=\"panel\" id=\"productDetailPanel\"><div class=\"panel-head\"><h2>상품별 상세실적</h2><input type=\"search\" id=\"productDetailSearch\" placeholder=\"상품명 검색\" oninput=\"renderProductDetailPage()\" style=\"width:260px;max-width:42vw;height:36px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;padding:0 10px;font-size:13px\"></div><div class=\"table-wrap\" style=\"max-height:620px\"><table id=\"productDetailTable\"></table></div></section>\n      <section class=\"grid-2\">\n        <div class=\"panel\"><div class=\"panel-head\"><h2>데이터 품질 신호</h2>",
-    'product detail inline panel'
-  );
-
-  html = replaceOrFail(
-    html,
-    /let ALL=\[\], charts=\{\}, activeIssue='channelUnmapped', currentPage='overview';/,
-    "let RAW_ROWS=[], ALL=[], PRODUCT_CACHE=[], QUALITY_ROWS=[], DATA_MODE='orders', charts={}, activeIssue='channelUnmapped', currentPage='overview';",
-    'state'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function orderCount\(rows\)\{return new Set\(rows\.map\(r=>r\.id\)\)\.size\}/,
-    "function orderCount(rows){return rows.some(r=>r.orders!==undefined)?sum(rows,'orders'):new Set(rows.map(r=>r.id).filter(Boolean)).size}\n" +
-    "function cleanCacheRow(r){return {sheetRow:NUM(r.sheetRow),id:String(r.id||r.orderId||''),item:r.item||r.itemName||'',qty:NUM(r.qty||r.quantity),revenue:NUM(r.revenue||r.sales),ship:NUM(r.ship),shop:r.shop||r.shopName||'',date:parseDate(r.date||r.orderDate),channel:r.channel||r.channelGroup||'미매핑',product:r.product||r.stdProduct||r.item||r.itemName||'',category:r.category||'미매핑',settlement:NUM(r.settlement),cost:NUM(r.cost),shipCost:NUM(r.shipCost),margin:NUM(r.margin),manager:r.manager||'미지정',orders:NUM(r.orders||r.orderCount||r.count)}}\n" +
-    "function buildBaseCache(rows){let m=new Map(); rows.forEach(r=>{let key=[r.date,r.channel,r.category,r.manager].join('|||'); if(!m.has(key))m.set(key,{date:r.date,channel:r.channel,category:r.category,manager:r.manager,qty:0,revenue:0,settlement:0,cost:0,shipCost:0,margin:0,orders:0,_ids:new Set()}); let o=m.get(key); o.qty+=r.qty||0; o.revenue+=r.revenue||0; o.settlement+=r.settlement||0; o.cost+=r.cost||0; o.shipCost+=r.shipCost||0; o.margin+=r.margin||0; if(r.id)o._ids.add(r.id)}); return [...m.values()].map(o=>{o.orders=o._ids.size; delete o._ids; return o})}\n" +
-    "function normalizeApiResponse(json){let cache=json&& !Array.isArray(json) ? (json.dashboardCache||json.cache||json.summary) : null; if(cache&&Array.isArray(cache.baseRows)){RAW_ROWS=[]; ALL=cache.baseRows.map(cleanCacheRow).filter(r=>r.date); PRODUCT_CACHE=(cache.productRows||[]).map(cleanCacheRow).filter(r=>r.date); QUALITY_ROWS=(cache.qualityRows||[]).map(cleanCacheRow).filter(r=>r.date); DATA_MODE='server-cache'; return} let src=Array.isArray(json)?json:(json.orders||json.data||json.rows||[]); RAW_ROWS=src.map(clean).filter(r=>r.id&&r.date); ALL=buildBaseCache(RAW_ROWS); PRODUCT_CACHE=[]; QUALITY_ROWS=[]; DATA_MODE='client-cache'}",
-    'cache helpers'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function daysBetween\(a,b\)\{return Math\.max\(0,Math\.round\(\(asDate\(b\)-asDate\(a\)\)\/86400000\)\+1\)\}\s*function dateList\(a,b\)\{let out=\[\], n=daysBetween\(a,b\); for\(let i=0;i<n;i\+\+\)out\.push\(addDays\(a,i\)\); return out\}/,
-    "function dashboardDateOk(s){if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(s||'')))return false; let y=Number(String(s).slice(0,4)); return y>=2020&&y<=2035&&!isNaN(asDate(s).getTime())}\n" +
-    "function daysBetween(a,b){if(!dashboardDateOk(a)||!dashboardDateOk(b))return 0; return Math.max(0,Math.min(370,Math.round((asDate(b)-asDate(a))/86400000)+1))}\n" +
-    "function dateList(a,b){let out=[], n=daysBetween(a,b); for(let i=0;i<n;i++)out.push(addDays(a,i)); return out}\n" +
-    "let dateInputTimer=null",
-    'date helpers'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function computedTarget\(\)\{let pr=prevRange\(\), prev=sum\(sameFilterRows\(pr\.from,pr\.to\),'revenue'\), cur=sum\(filtered\(\),'revenue'\), base=prev\?prev\*1\.08:cur\*1\.2; return Math\.max\(0,Math\.round\(base\/1000000\)\*1000000\)\}/,
-    "const QUARTER_MONTHLY_TARGETS={1:290407733,2:348489280,3:418187136,4:501824563}\n" +
-    "function quarterOfDate(s){return Math.floor(asDate(s).getMonth()/3)+1}\n" +
-    "function monthDays(s){let d=asDate(s); return new Date(d.getFullYear(),d.getMonth()+1,0).getDate()}\n" +
-    "function roundMillion(n){return Math.max(0,Math.round((n||0)/1000000)*1000000)}\n" +
-    "function quarterPeriodTarget(){let dates=dateList($('dateFrom').value,$('dateTo').value); let total=dates.reduce((a,d)=>a+(QUARTER_MONTHLY_TARGETS[quarterOfDate(d)]||0)/monthDays(d),0); return roundMillion(total)}\n" +
-    "function computedTarget(){return quarterPeriodTarget()}",
-    'quarter target'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function applyTarget\(\)\{let saved=localStorage\.getItem\(targetKey\(\)\); \$\('targetInput'\)\.value=saved===null\?computedTarget\(\):NUM\(saved\); \$\('targetSource'\)\.textContent=saved===null\?'전월 동기간 기준 자동 목표':'브라우저 저장 목표'\}/,
-    "function applyTarget(){let saved=localStorage.getItem(targetKey()); $('targetInput').value=saved===null?computedTarget():NUM(saved); $('targetSource').textContent=saved===null?'분기 목표 기준 자동 목표':'브라우저 저장 목표'}",
-    'target source label'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function filtered\(\)\{let ch=\$\('channelFilter'\)\.value,cat=\$\('categoryFilter'\)\.value,mgr=\$\('managerFilter'\)\.value; return ALL\.filter\(r=>inDateRange\(r\)&&\(ch==='ALL'\|\|r\.channel===ch\)&&\(cat==='ALL'\|\|r\.category===cat\)&&\(mgr==='ALL'\|\|r\.manager===mgr\)\)\}/,
-    "function filtered(){let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return ALL.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
-    "function rawFiltered(){let base=QUALITY_ROWS.length?QUALITY_ROWS:RAW_ROWS; if(!base.length)return []; let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||r.manager===mgr))}\n" +
-    "function productRows(){let base=PRODUCT_CACHE.length?PRODUCT_CACHE:RAW_ROWS; if(!base.length)return filtered(); let ch=$('channelFilter').value,cat=$('categoryFilter').value,mgr=$('managerFilter').value; return base.filter(r=>inDateRange(r)&&(ch==='ALL'||!r.channel||r.channel===ch)&&(cat==='ALL'||r.category===cat)&&(mgr==='ALL'||!r.manager||r.manager===mgr))}",
-    'filters'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function handleDateChange\(\)\{if\(\$\('dateFrom'\)\.value>\$\('dateTo'\)\.value\)\{let t=\$\('dateFrom'\)\.value; \$\('dateFrom'\)\.value=\$\('dateTo'\)\.value; \$\('dateTo'\)\.value=t\} refreshFilterOptions\(\); applyTarget\(\); renderAll\(\)\}/,
-    "function handleDateChange(){clearTimeout(dateInputTimer); dateInputTimer=setTimeout(()=>{let from=$('dateFrom').value,to=$('dateTo').value; if(!dashboardDateOk(from)||!dashboardDateOk(to))return; if(from>to){let active=document.activeElement&&document.activeElement.id; if(active==='dateFrom')$('dateTo').value=from; else $('dateFrom').value=to} refreshFilterOptions(); applyTarget(); renderAll()},250)}",
-    'date change guard'
-  );
-
-  html = replaceOrFail(
-    html,
-    /let res=await fetch\(API_URL\+'\?t='\+Date\.now\(\),\{cache:'no-store',signal:controller\.signal\}\);/,
-    "let joiner=API_URL.indexOf('?')>=0?'&':'?';\n    let res=await fetch(API_URL+joiner+'mode=cache&t='+Date.now(),{cache:'no-store',signal:controller.signal});",
-    'cache fetch'
-  );
-
-  html = replaceOrFail(
-    html,
-    /let json=await res\.json\(\), src=Array\.isArray\(json\)\?json:\(json\.orders\|\|json\.data\|\|json\.rows\|\|\[\]\);\s*ALL=src\.map\(clean\)\.filter\(r=>r\.id&&r\.date\);/,
-    'let json=await res.json();\n    normalizeApiResponse(json);',
-    'normalize response'
-  );
-
-  html = replaceOrFail(
-    html,
-    /initControls\(\); setStatus\('','실시간 연결'\); \$\('sideStatus'\)\.textContent='Google Sheets 연결 완료'; \$\('sideMeta'\)\.textContent=`\$\{ALL\.length\.toLocaleString\('ko-KR'\)\} rows`; renderAll\(\);/,
-    "initControls(); setStatus('',DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더'); $('sideStatus').textContent='Google Sheets 연결 완료'; $('sideMeta').textContent=DATA_MODE==='server-cache'?`${ALL.length.toLocaleString('ko-KR')} summary rows`:`${RAW_ROWS.length.toLocaleString('ko-KR')} raw → ${ALL.length.toLocaleString('ko-KR')} summary`; renderAll();",
-    'status'
-  );
-
-  html = replaceOrFail(
-    html,
-    /function renderAll\(\)\{if\(!ALL\.length\)return; refreshFilterOptions\(\); let rows=filtered\(\), target=NUM\(\$\('targetInput'\)\.value\); \$\('rangePill'\)\.textContent=`\$\{\$\('dateFrom'\)\.value\} ~ \$\{\$\('dateTo'\)\.value\}`; renderKpis\(rows,target\); renderCumulative\(rows,target\); renderChannelProgress\(rows,target\); renderDaily\(rows\); renderMoM\(rows\); renderChannelDaily\(rows\); renderProfitStructure\(rows\); renderProduct\(rows\); renderChannelTable\(rows\); renderQuality\(rows\); renderManagerPage\(rows\)\}/,
-    "function renderProductDetailPage(){let table=$('productDetailTable'); if(!table)return; let q=(($('productDetailSearch')&&$('productDetailSearch').value)||'').trim().toLowerCase(); let base=productRows(); let entries=[...group(base,'product')].map(([name,rs])=>({name,cat:rs[0]&&rs[0].category||'미분류',orders:orderCount(rs),qty:sum(rs,'qty'),rev:sum(rs,'revenue'),stl:sum(rs,'settlement'),cost:sum(rs,'cost'),mar:sum(rs,'margin')})).filter(e=>!q||String(e.name).toLowerCase().includes(q)||String(e.cat).toLowerCase().includes(q)).sort((a,b)=>b.rev-a.rev); if(!entries.length){emptyTable('productDetailTable','검색 결과 없음');return} let totals=entries.reduce((a,e)=>{a.orders+=e.orders;a.qty+=e.qty;a.rev+=e.rev;a.stl+=e.stl;a.cost+=e.cost;a.mar+=e.mar;return a},{orders:0,qty:0,rev:0,stl:0,cost:0,mar:0}); let body=entries.map(e=>{let rate=e.rev?e.mar/e.rev*100:0; return `<tr><td>${html(e.name)}</td><td>${html(e.cat)}</td><td class=\"r\">${e.orders.toLocaleString('ko-KR')}건</td><td class=\"r\">${e.qty.toLocaleString('ko-KR')}</td><td class=\"r\">${KRW(e.rev)}</td><td class=\"r\">${KRW(e.stl)}</td><td class=\"r\">${KRW(e.cost)}</td><td class=\"r ${e.mar<0?'neg':''}\">${KRW(e.mar)}</td><td class=\"r ${rate<0?'neg':''}\">${rate.toFixed(1)}%</td></tr>`}).join(''); let totalRate=totals.rev?totals.mar/totals.rev*100:0; table.innerHTML=`<thead><tr><th>표준품목명</th><th>상품군</th><th class=\"r\">주문건수</th><th class=\"r\">수량</th><th class=\"r\">매출</th><th class=\"r\">정산액</th><th class=\"r\">원가</th><th class=\"r\">마진</th><th class=\"r\">마진율</th></tr></thead><tbody>${body}<tr style=\"background:#1d3554;color:#fff;font-weight:900\"><td>합계 (${entries.length.toLocaleString('ko-KR')}개 필터)</td><td></td><td class=\"r\">${totals.orders.toLocaleString('ko-KR')}건</td><td class=\"r\">${totals.qty.toLocaleString('ko-KR')}</td><td class=\"r\">${KRW(totals.rev)}</td><td class=\"r\">${KRW(totals.stl)}</td><td class=\"r\">${KRW(totals.cost)}</td><td class=\"r\">${KRW(totals.mar)}</td><td class=\"r\">${totalRate.toFixed(1)}%</td></tr></tbody>`}\n" +
-    "function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderProductDetailPage(); renderQuality(detailRows.length?detailRows:rows); renderManagerPage(rows)}",
-    'renderAll and product detail'
-  );
-
+  const oldIndexUrl = 'https://raw.githubusercontent.com/wltjq1324-cloud/b2c_dashboard_ourbox/5342326d2fb8e36a8cf7dbb3af27cdbe6d6a1284/index.html';
+  const response = await fetch(oldIndexUrl, { cache: 'no-store' });
+  if(!response.ok) throw new Error('이전 버전 로드 실패: HTTP ' + response.status);
+  const html = await response.text();
   document.open();
   document.write(html);
   document.close();
 })().catch(function(err){
-  document.body.innerHTML = '<div class="boot"><div class="card"><div class="title">캐시 대시보드 로딩 실패</div><div class="sub">' + String(err.message || err).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]}) + '</div></div></div>';
+  document.body.innerHTML = '<div class="boot"><div class="card"><div class="title">이전 대시보드 로딩 실패</div><div class="sub">' + String(err.message || err).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]}) + '</div></div></div>';
 });
 </script>
 </body>
