@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>아워박스 세일즈 대시보드 캐시 버전</title>
+  <title>B2C 판매데이터 대시보드</title>
   <style>
     body{margin:0;background:#f4f6f9;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}
     .boot{min-height:100vh;display:grid;place-items:center}
@@ -26,7 +26,7 @@
 
   var html = await response.text();
 
-  html = replaceOrFail(html, /<title>[\s\S]*?<\/title>/, '<title>아워박스 세일즈 대시보드 캐시 버전</title>', 'title');
+  html = replaceOrFail(html, /<title>[\s\S]*?<\/title>/, '<title>B2C 판매데이터 대시보드</title>', 'title');
   html = replaceOrFail(html, /<h2>일별 매출 리듬<\/h2>/, '<h2>일별 매출 추이</h2>', 'daily chart title');
 
   html = replaceOrFail(
