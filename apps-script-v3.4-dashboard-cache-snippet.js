@@ -14,6 +14,7 @@
 //      ' / product ' + cacheStats.productRows +
 //      ' / quality ' + cacheStats.qualityRows + '행';
 //    msg += '\n품질 신호: ' + cacheStats.issueText;
+//    msg += '\n소요 시간: ' + cacheStats.timingText;
 //
 // 4. 이 파일의 나머지 helper 함수들을 기존 Apps Script 맨 아래에 붙여넣기
 //
@@ -64,12 +65,27 @@ function getDashboardCache() {
 
 function refreshDashboardCache(ss, processedRows) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var t0 = Date.now();
   var orders = processedRows
     ? processedRows.map(function(row, i) { return processedRowToOrder_(row, i); })
     : readProcessedOrdersForCache_(ss);
+  var t1 = Date.now();
 
   var cache = buildDashboardCacheFromOrders_(orders);
+  var t2 = Date.now();
+
   writeDashboardCache_(ss, cache);
+  var t3 = Date.now();
+
+  // 어느 단계가 느린지 alert / 실행 로그에서 바로 볼 수 있게 초 단위로 남깁니다.
+  var timings = {
+    readSec: Math.round((t1 - t0) / 100) / 10,
+    buildSec: Math.round((t2 - t1) / 100) / 10,
+    writeSec: Math.round((t3 - t2) / 100) / 10,
+    totalSec: Math.round((t3 - t0) / 100) / 10
+  };
+  Logger.log('dashboard_cache 갱신: 읽기 %ss / 집계 %ss / 쓰기 %ss / 합계 %ss',
+    timings.readSec, timings.buildSec, timings.writeSec, timings.totalSec);
 
   return {
     rawRows: orders.length,
@@ -77,7 +93,10 @@ function refreshDashboardCache(ss, processedRows) {
     productRows: cache.productRows.length,
     qualityRows: cache.qualityRows.length,
     issues: cache.meta.issueCounts,
-    issueText: qualityCountText_(cache.meta.issueCounts)
+    issueText: qualityCountText_(cache.meta.issueCounts),
+    timings: timings,
+    timingText: '캐시 ' + timings.totalSec + 's (읽기 ' + timings.readSec +
+      ' / 집계 ' + timings.buildSec + ' / 쓰기 ' + timings.writeSec + ')'
   };
 }
 
@@ -312,11 +331,9 @@ function writeDashboardCache_(ss, cache) {
   appendJsonChunks_(rows, 'qualityRows', cache.qualityRows);
 
   sheet.getRange(1, 1, rows.length, 3).setValues(rows);
-  sheet.getRange(1, 1, 1, 3)
-    .setFontWeight('bold')
-    .setBackground('#1F2937')
-    .setFontColor('#FFFFFF');
-  sheet.autoResizeColumns(1, 3);
+
+  // autoResizeColumns는 셀 하나가 45,000자인 이 시트에서 특히 느리고,
+  // 숨김 시트라 사람이 볼 일도 없어서 뺐습니다. 헤더 서식도 같은 이유로 생략합니다.
 
   // 사용자가 직접 볼 필요 없는 캐시 시트입니다.
   try { sheet.hideSheet(); } catch (err) {}
