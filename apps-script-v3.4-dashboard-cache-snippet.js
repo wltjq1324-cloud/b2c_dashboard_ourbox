@@ -13,6 +13,7 @@
 //    msg += '\n요약 캐시: base ' + cacheStats.baseRows +
 //      ' / product ' + cacheStats.productRows +
 //      ' / quality ' + cacheStats.qualityRows + '행';
+//    msg += '\n품질 신호: ' + cacheStats.issueText;
 //
 // 4. 이 파일의 나머지 helper 함수들을 기존 Apps Script 맨 아래에 붙여넣기
 //
@@ -74,8 +75,26 @@ function refreshDashboardCache(ss, processedRows) {
     rawRows: orders.length,
     baseRows: cache.baseRows.length,
     productRows: cache.productRows.length,
-    qualityRows: cache.qualityRows.length
+    qualityRows: cache.qualityRows.length,
+    issues: cache.meta.issueCounts,
+    issueText: qualityCountText_(cache.meta.issueCounts)
   };
+}
+
+function qualityCountText_(counts) {
+  var labels = {
+    channelUnmapped: '채널 미매핑',
+    productUnmapped: '상품 미매핑',
+    managerMissing: '담당자 미지정',
+    costMissing: '원가 0/1',
+    zeroRevenue: '매출 0원',
+    negativeMargin: '마진 음수'
+  };
+  var out = [];
+  for (var key in labels) {
+    out.push(labels[key] + ' ' + ((counts && counts[key]) || 0));
+  }
+  return out.join(' / ');
 }
 
 function readProcessedOrdersForCache_(ss) {
@@ -96,30 +115,57 @@ function readProcessedOrdersForCache_(ss) {
 function processedRowToOrder_(row, i) {
   return {
     sheetRow: i + 2,
-    id: String(row[0] || '').trim(),
-    item: String(row[1] || '').trim(),
-    qty: Number(row[2]) || 0,
-    revenue: Number(row[3]) || 0,
-    ship: Number(row[4]) || 0,
-    shop: String(row[5] || '').trim(),
-    dt: String(row[6] || '').trim(),
+    id: text_(row[0]),
+    item: text_(row[1]),
+    qty: num_(row[2]),
+    revenue: num_(row[3]),
+    ship: num_(row[4]),
+    shop: text_(row[5]),
+    dt: text_(row[6]),
     date: normalizeDateOnly_(row[7] || row[6]),
-    channel: String(row[8] || '미매핑').trim(),
-    product: String(row[9] || '미매핑').trim(),
-    category: String(row[10] || '미매핑').trim(),
-    feeRate: Number(row[11]) || 0,
-    settlement: Number(row[12]) || 0,
-    cost: Number(row[13]) || 0,
-    shipCost: Number(row[14]) || 0,
-    margin: Number(row[15]) || 0,
-    manager: String(row[16] || '미지정').trim()
+    channel: text_(row[8], '미매핑'),
+    product: text_(row[9], '미매핑'),
+    category: text_(row[10], '미매핑'),
+    feeRate: num_(row[11]),
+    settlement: num_(row[12]),
+    cost: num_(row[13]),
+    shipCost: num_(row[14]),
+    margin: num_(row[15]),
+    manager: text_(row[16], '미지정')
   };
+}
+
+// 가공_데이터 셀이 숫자가 아니라 "33,000" 같은 텍스트로 들어오는 경우가 있습니다.
+// Number("33,000")은 NaN이라 예전 코드에서는 그대로 0이 되어
+// 대시보드에 '매출 0원 품목' / '원가 0 또는 1' 품질 신호로 잡혔습니다.
+function num_(value) {
+  if (typeof value === 'number') return isFinite(value) ? value : 0;
+  if (value instanceof Date) return 0;
+  var text = String(value == null ? '' : value).replace(/[,\s₩원]/g, '');
+  if (!text || text === '-') return 0;
+  var parsed = Number(text);
+  return isFinite(parsed) ? parsed : 0;
+}
+
+// String(x || 'fallback').trim() 은 x가 ' ' 처럼 공백만 있을 때 ''를 돌려줍니다.
+// 그러면 미매핑으로 분류되지 않고 빈 채널/빈 상품군이 조용히 통과합니다.
+function text_(value, fallback) {
+  var text = String(value == null ? '' : value).trim();
+  return text || (fallback || '');
 }
 
 function buildDashboardCacheFromOrders_(orders) {
   var baseMap = {};
   var productMap = {};
   var qualityRows = [];
+  var issueCounts = {
+    channelUnmapped: 0,
+    productUnmapped: 0,
+    managerMissing: 0,
+    costMissing: 0,
+    zeroRevenue: 0,
+    negativeMargin: 0
+  };
 
   for (var i = 0; i < orders.length; i++) {
     var order = orders[i];
@@ -151,8 +197,12 @@ function buildDashboardCacheFromOrders_(orders) {
       product: order.product
     }, order);
 
-    if (qualityIssueKeys_(order).length > 0) {
-      qualityRows.push(compactQualityRow_(order));
+    var issues = qualityIssueKeys_(order);
+    if (issues.length > 0) {
+      for (var k = 0; k < issues.length; k++) {
+        issueCounts[issues[k]] = (issueCounts[issues[k]] || 0) + 1;
+      }
+      qualityRows.push(compactQualityRow_(order, issues));
     }
   }
 
@@ -165,7 +215,8 @@ function buildDashboardCacheFromOrders_(orders) {
     rawRows: orders.length,
     baseRows: baseRows.length,
     productRows: productRows.length,
-    qualityRows: qualityRows.length
+    qualityRows: qualityRows.length,
+    issueCounts: issueCounts
   };
 
   return {
@@ -226,7 +277,7 @@ function qualityIssueKeys_(order) {
   return keys;
 }
 
-function compactQualityRow_(order) {
+function compactQualityRow_(order, issues) {
   return {
     sheetRow: order.sheetRow,
     id: order.id,
@@ -244,7 +295,7 @@ function compactQualityRow_(order) {
     shipCost: order.shipCost,
     margin: order.margin,
     manager: order.manager,
-    issueKeys: qualityIssueKeys_(order).join(',')
+    issueKeys: (issues || qualityIssueKeys_(order)).join(',')
   };
 }
 
