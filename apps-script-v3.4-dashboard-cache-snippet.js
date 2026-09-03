@@ -58,6 +58,7 @@ function getDashboardCache() {
   // 이후 refreshDashboardCache()를 한 번 실행하면 doGet은 이 경로를 타지 않습니다.
   var processed = getProcessedData();
   var cache = buildDashboardCacheFromOrders_(processed.orders || []);
+  attachSheetMeta_(ss, cache);
   cache.meta.source = 'built_on_demand';
   cache.meta.warning = 'dashboard_cache sheet was missing; run refreshProcessedData once';
   return { dashboardCache: cache, meta: cache.meta };
@@ -72,6 +73,7 @@ function refreshDashboardCache(ss, processedRows) {
   var t1 = Date.now();
 
   var cache = buildDashboardCacheFromOrders_(orders);
+  attachSheetMeta_(ss, cache);
   var t2 = Date.now();
 
   writeDashboardCache_(ss, cache);
@@ -98,6 +100,13 @@ function refreshDashboardCache(ss, processedRows) {
     timingText: '캐시 ' + timings.totalSec + 's (읽기 ' + timings.readSec +
       ' / 집계 ' + timings.buildSec + ' / 쓰기 ' + timings.writeSec + ')'
   };
+}
+
+// 대시보드의 '가공_데이터 행' 칩이 정확한 탭으로 점프하도록 시트 id와 탭 gid를 실어 보냅니다.
+function attachSheetMeta_(ss, cache) {
+  var processed = ss.getSheetByName('가공_데이터');
+  cache.meta.spreadsheetId = ss.getId();
+  cache.meta.processedSheetGid = processed ? processed.getSheetId() : null;
 }
 
 function qualityCountText_(counts) {
