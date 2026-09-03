@@ -32,9 +32,17 @@
 //   - 대시보드: cache.meta.issueCounts 품질 항목별 건수.
 //   - 메뉴: '🧹 가공_데이터 전체 재생성' 추가. raw_orders 기존 행을 고쳤을 때 누르세요.
 //
-// v3.6.1 변경 (선택 배포 — 급하지 않음):
+// v3.6.1 변경:
 //   - cache.meta에서 spreadsheetId / processedSheetGid 제거. 대시보드가 시트 링크를 더 이상
 //     만들지 않으므로 공개 JSON에 시트 ID를 실을 이유가 없습니다.
+//
+// v3.6.2 변경 (품질 신호를 주문 단위로):
+//   - 도착보장 합배송은 한 주문이 여러 행으로 나뉘고 금액이 한 행에 몰립니다.
+//     나머지 0원 행은 데이터 오류가 아니라 구조라서 'zeroRevenueSplit'(합배송 분할, 참고)으로 따로 분류합니다.
+//     주문 전체가 0원인 행만 'zeroRevenue'(확인)로 남습니다.
+//   - 'negativeMargin'은 행 마진이 아니라 **주문 합계 마진**이 음수일 때만 잡습니다.
+//     (합배송 0원 행은 행 마진이 늘 음수라 12,000건 넘게 오탐이었습니다)
+//   - 전체 재생성 사유가 '매핑 시트 변경'일 때 무엇이 바뀌었는지(행 수 변화) alert에 표시합니다.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -153,6 +161,7 @@ function refreshProcessedDataCore_(forceFull) {
   // 2. 증분 가능 여부 판단
   var state = loadProcState_();
   var mapSig = mapSignature_(chMap, prMap, costMap, shipCost);
+  var mapSummary = mapSummary_(chMap, prMap, costMap, shipCost);
   var decision = decideRefreshMode_(state, {
     forceFull: !!forceFull,
     rawCount: rawCount,
@@ -223,6 +232,7 @@ function refreshProcessedDataCore_(forceFull) {
     rawCount: rawCount,
     processedRows: processedTotal,
     mapSig: mapSig,
+    mapSummary: mapSummary,
     firstRawKey: rawRowKey_(rawSheet, 2),
     lastRawKey: rawRowKey_(rawSheet, rawCount + 1),
     updatedAt: new Date().toISOString()
@@ -232,7 +242,8 @@ function refreshProcessedDataCore_(forceFull) {
   var msg = '✅ 가공_데이터 갱신 완료!\n\n' +
     '모드: ' + (incremental
       ? '증분 (+' + newRows.length + '행)'
-      : '전체 재생성 (' + decisionReasonText_(decision.reason) + ')') + '\n' +
+      : '전체 재생성 (' + decisionReasonText_(decision.reason) +
+        (decision.reason === 'map_changed' ? ' — ' + mapChangeText_(state && state.mapSummary, mapSummary) : '') + ')') + '\n' +
     '처리 행 수: ' + processedTotal + '건\n' +
     (nothingToDo ? '' : '고유 주문 수: ' + Object.keys(seenOrders).length + '건\n');
 
@@ -277,6 +288,31 @@ function decideRefreshMode_(state, ctx) {
   if (state.firstRawKey !== ctx.firstRawKey) return full('raw_mismatch');
   if (state.lastRawKey !== ctx.watermarkKey) return full('raw_mismatch');
   return { mode: 'incremental', reason: 'ok', newRows: ctx.rawCount - state.rawCount };
+}
+
+// 매핑 시트 규모 요약. 전체 재생성 사유가 '매핑 시트 변경'일 때 무엇이 바뀌었는지 보여주는 용도입니다.
+function mapSummary_(chMap, prMap, costMap, shipCost) {
+  var mapped = 0;
+  for (var k in prMap) {
+    var p = prMap[k];
+    if (p.std || p.cat || p.parts) mapped++;
+  }
+  return {
+    channels: Object.keys(chMap).length,
+    productsMapped: mapped,
+    costs: Object.keys(costMap).length,
+    shipCost: shipCost
+  };
+}
+
+function mapChangeText_(before, after) {
+  if (!before) return '이전 요약 없음';
+  var parts = [];
+  if (before.channels !== after.channels) parts.push('map_channel ' + before.channels + '→' + after.channels + '행');
+  if (before.productsMapped !== after.productsMapped) parts.push('map_product 매핑완료 ' + before.productsMapped + '→' + after.productsMapped + '행');
+  if (before.costs !== after.costs) parts.push('map_cost ' + before.costs + '→' + after.costs + '행');
+  if (before.shipCost !== after.shipCost) parts.push('출고배송비 ' + before.shipCost + '→' + after.shipCost);
+  return parts.length ? parts.join(', ') : '행 수는 같고 값이 바뀜';
 }
 
 function decisionReasonText_(reason) {
@@ -762,8 +798,9 @@ function qualityCountText_(counts) {
     productUnmapped: '상품 미매핑',
     managerMissing: '담당자 미지정',
     costMissing: '원가 0/1',
-    zeroRevenue: '매출 0원',
-    negativeMargin: '마진 음수'
+    zeroRevenue: '매출 0원(주문 전체)',
+    negativeMargin: '마진 음수(주문 단위)',
+    zeroRevenueSplit: '합배송 분할 0원(참고)'
   };
   var out = [];
   for (var key in labels) {
@@ -820,8 +857,19 @@ function buildDashboardCacheFromOrders_(orders) {
     managerMissing: 0,
     costMissing: 0,
     zeroRevenue: 0,
+    zeroRevenueSplit: 0,
     negativeMargin: 0
   };
+
+  // 주문 단위 합계 (합배송 분할 행 판정용): 같은 주문번호의 매출·마진을 먼저 모읍니다.
+  var orderTotals = {};
+  for (var t = 0; t < orders.length; t++) {
+    var o = orders[t];
+    if (!o || !o.date || !o.id) continue;
+    if (!orderTotals[o.id]) orderTotals[o.id] = { revenue: 0, margin: 0 };
+    orderTotals[o.id].revenue += o.revenue || 0;
+    orderTotals[o.id].margin += o.margin || 0;
+  }
 
   for (var i = 0; i < orders.length; i++) {
     var order = orders[i];
@@ -853,7 +901,7 @@ function buildDashboardCacheFromOrders_(orders) {
       product: order.product
     }, order);
 
-    var issues = qualityIssueKeys_(order);
+    var issues = qualityIssueKeys_(order, orderTotals);
     if (issues.length > 0) {
       for (var k = 0; k < issues.length; k++) {
         issueCounts[issues[k]] = (issueCounts[issues[k]] || 0) + 1;
@@ -866,7 +914,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.6',
+    version: 'v3.6.2',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -927,14 +975,22 @@ function finalizeAgg_(map) {
   });
 }
 
-function qualityIssueKeys_(order) {
+// orderTotals가 있으면 매출 0원 / 마진 음수를 주문 단위로 판정합니다.
+// - 행은 0원인데 같은 주문의 다른 행에 매출이 있으면 → zeroRevenueSplit (합배송 분할, 참고용)
+// - 주문 전체가 0원이면 → zeroRevenue (확인 필요)
+// - 마진 음수는 행이 아니라 주문 합계 마진이 음수일 때만
+function qualityIssueKeys_(order, orderTotals) {
   var keys = [];
+  var total = (orderTotals && order.id && orderTotals[order.id]) || null;
+  var orderRevenue = total ? total.revenue : order.revenue;
+  var orderMargin = total ? total.margin : order.margin;
+
   if (order.channel === '미매핑') keys.push('channelUnmapped');
   if (order.product === '미매핑' || order.category === '미매핑') keys.push('productUnmapped');
   if (!order.manager || order.manager === '미지정') keys.push('managerMissing');
   if (order.cost <= 1 && order.revenue > 0) keys.push('costMissing');
-  if (order.revenue === 0) keys.push('zeroRevenue');
-  if (order.margin < 0) keys.push('negativeMargin');
+  if (order.revenue === 0) keys.push(orderRevenue > 0 ? 'zeroRevenueSplit' : 'zeroRevenue');
+  if (order.margin < 0 && orderMargin < 0) keys.push('negativeMargin');
   return keys;
 }
 
