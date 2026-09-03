@@ -29,9 +29,12 @@
 //             기존 Number("33,000")은 NaN → 0 이라 '매출 0원 품목'으로 잡혔습니다.
 //   - 정확성: text_() — 공백만 있는 셀을 미매핑/미지정으로 확실히 분류합니다.
 //   - 정확성: map_product에 자동 추가만 되고 표준품목명이 빈 품목은 가공_데이터에도 '미매핑'으로 씁니다.
-//   - 대시보드: cache.meta에 spreadsheetId / 가공_데이터 gid를 실어 행 칩이 정확한 탭으로 점프합니다.
 //   - 대시보드: cache.meta.issueCounts 품질 항목별 건수.
 //   - 메뉴: '🧹 가공_데이터 전체 재생성' 추가. raw_orders 기존 행을 고쳤을 때 누르세요.
+//
+// v3.6.1 변경 (선택 배포 — 급하지 않음):
+//   - cache.meta에서 spreadsheetId / processedSheetGid 제거. 대시보드가 시트 링크를 더 이상
+//     만들지 않으므로 공개 JSON에 시트 ID를 실을 이유가 없습니다.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -712,7 +715,6 @@ function getDashboardCache() {
 
   var processed = getProcessedData();
   var cache = buildDashboardCacheFromOrders_(processed.orders || []);
-  attachSheetMeta_(ss, cache);
   cache.meta.source = 'built_on_demand';
   cache.meta.warning = 'dashboard_cache sheet was missing; run refreshProcessedData once';
   return { dashboardCache: cache, meta: cache.meta };
@@ -727,7 +729,6 @@ function refreshDashboardCache(ss, processedRows) {
   var t1 = Date.now();
 
   var cache = buildDashboardCacheFromOrders_(orders);
-  attachSheetMeta_(ss, cache);
   var t2 = Date.now();
 
   writeDashboardCache_(ss, cache);
@@ -753,13 +754,6 @@ function refreshDashboardCache(ss, processedRows) {
     timingText: '캐시 ' + timings.totalSec + 's (읽기 ' + timings.readSec +
       ' / 집계 ' + timings.buildSec + ' / 쓰기 ' + timings.writeSec + ')'
   };
-}
-
-// 대시보드의 '가공_데이터 행' 칩이 정확한 탭으로 점프하도록 시트 id와 탭 gid를 실어 보냅니다.
-function attachSheetMeta_(ss, cache) {
-  var processed = ss.getSheetByName('가공_데이터');
-  cache.meta.spreadsheetId = ss.getId();
-  cache.meta.processedSheetGid = processed ? processed.getSheetId() : null;
 }
 
 function qualityCountText_(counts) {
