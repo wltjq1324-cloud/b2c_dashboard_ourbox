@@ -10,7 +10,7 @@
 - 캐시 테스트 대시보드: `sales-progress-dashboard-prototype-20260512-cache.html`
 - 기존 프로토타입: `sales-progress-dashboard-prototype-20260512.html`
 - 데이터 원본: Google Sheets `raw_orders`, `가공_데이터`, `map_channel`, `map_product`, `map_cost`
-- Apps Script 현재 기준: v3.4 cache patch
+- Apps Script 현재 기준: **v3.6** — `apps-script-v3.6.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
 
 `index.html`은 대시보드 본문을 gzip + base64로 압축해 런타임에 풀어 쓰는 구조입니다.
 그래서 `index.html`은 직접 수정하지 않습니다. 수정은 항상 아래 순서로 합니다.
@@ -157,7 +157,7 @@ Apps Script `doGet(e)`에 아래 mode를 추가하는 방향이 좋습니다.
 
 ### 이번에 고친 것
 
-Apps Script (`apps-script-v3.4-dashboard-cache-snippet.js`)
+Apps Script (`apps-script-v3.6.js`)
 
 - `num_()` 추가: 콤마·통화기호·공백이 붙은 텍스트 숫자를 정상 파싱합니다.
   `"33,000"` → `33000`. 기존에는 `0`이었습니다.
@@ -213,3 +213,42 @@ Apps Script (`apps-script-v3.4-dashboard-cache-snippet.js`)
 - `readProcessedOrdersForCache_()`가 `가공_데이터` 17개 열을 하드코딩합니다.
   열이 추가되면 조용히 어긋납니다. 헤더명 기반 인덱싱으로 바꾸는 편이 안전합니다.
 - `qualityRows` 전량이 첫 응답에 실려 옵니다(약 6,064행). 지연 로딩은 아직 미적용입니다.
+
+## 2026-09-03 Apps Script v3.6 — 갱신 버튼 속도
+
+### 왜 느렸는가
+
+v3.5까지는 `🔄 가공_데이터 갱신`을 누를 때마다 **raw_orders 전체(5만 행+)를 다시 매핑하고,
+가공_데이터를 지우고 5만 행 × 17열을 통째로 다시 썼습니다.** Apps Script에서 가장 비싼 작업이
+시트 쓰기라서, 행이 늘수록 버튼이 느려지는 구조였습니다.
+
+### v3.6 증분 갱신
+
+| 상황 | 동작 | 비용 |
+|---|---|---|
+| raw_orders에 행만 늘었을 때 (평소) | 새 행만 매핑해서 가공_데이터 **끝에 추가** | 새 행 수에 비례 |
+| 아무 변화 없을 때 | 매핑 시트만 읽고 끝. "변경 없음" 표시 | 수 초 |
+| map_channel / map_product / map_cost / 출고배송비를 고쳤을 때 | **자동으로 전체 재생성** | 예전과 같음 |
+| raw_orders 행이 줄었거나 순서·첫 행·마지막 행이 바뀌었을 때 | 자동으로 전체 재생성 | 예전과 같음 |
+| `🧹 가공_데이터 전체 재생성` 메뉴 | 무조건 전체 재생성 | 예전과 같음 |
+
+판단 근거는 문서 속성(`OURBOX_PROC_STATE`)에 저장된 이전 실행 상태입니다.
+매핑 시트 서명(`mapSig`)에서 표준품목명이 빈 map_product 행은 제외하므로, 새 품목이 자동 추가돼도
+증분이 유지되고 **사람이 표준품목명을 채우는 순간** 전체 재생성으로 전환됩니다.
+
+증분 갱신이 놓치는 경우 하나: **raw_orders의 기존 행을 제자리에서 고친 경우**(예: 실결제금액 수정).
+행 수·순서가 그대로라 감지하지 못합니다. 이때는 `🧹 전체 재생성`을 누르세요.
+
+### 그 밖의 v3.6 변경
+
+- 완료 alert에 단계별 소요 시간(`매핑 로드 / raw 읽기 / 가공_데이터 쓰기 / 캐시 생성 ...`)이 뜹니다. 느리면 어디가 느린지 이 숫자로 판단합니다.
+- `num_()` / `text_()`: 텍스트 숫자·공백 셀 처리를 raw 매핑 단계에도 적용했습니다. **'매출 0원 품목' 신호는 이 버전 배포 후 다시 세야 진짜 숫자입니다.**
+- `qualityRows`에서 대시보드가 쓰지 않는 `ship / settlement / shipCost`를 뺐습니다(전송량 감소).
+- 캐시 meta에 `spreadsheetId`, `processedSheetGid`, `issueCounts`가 실립니다.
+
+### 배포 순서
+
+1. Apps Script 편집기 → 기존 코드 전체 선택 → `apps-script-v3.6.js` 내용으로 교체 → 저장
+2. **배포 관리 → 기존 배포 → 새 버전** (URL 유지). 새 배포를 만들면 `dashboard.src.html`의 `API_URL`도 바꿔야 합니다
+3. 시트 새로고침 → 메뉴 `📊 아워박스` → `🔄 가공_데이터 갱신 (증분)` 1회 실행. 첫 실행은 상태가 없어서 전체 재생성입니다(예전 속도). 두 번째부터 증분입니다
+4. alert의 `품질 신호:` 줄과 `소요 시간:` 줄을 확인
