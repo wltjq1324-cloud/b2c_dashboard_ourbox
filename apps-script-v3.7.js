@@ -1,7 +1,7 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.6
+// 아워박스 MVP 대시보드 — Apps Script v3.7
 // ============================================================
-// 이 파일 전체를 Apps Script 편집기의 기존 v3.5 코드 위에 덮어쓰면 됩니다.
+// 이 파일 전체를 Apps Script 편집기의 기존 v3.6 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
 //
 // v3.3 유지:
@@ -43,6 +43,17 @@
 //   - 'negativeMargin'은 행 마진이 아니라 **주문 합계 마진**이 음수일 때만 잡습니다.
 //     (합배송 0원 행은 행 마진이 늘 음수라 12,000건 넘게 오탐이었습니다)
 //   - 전체 재생성 사유가 '매핑 시트 변경'일 때 무엇이 바뀌었는지(행 수 변화) alert에 표시합니다.
+//
+// v3.7 변경 (대시보드 첫 로딩 속도):
+//   - doGet(mode=cache)가 dashboard_cache 시트의 JSON 텍스트를 **파싱하지 않고 그대로 이어 붙여** 응답합니다.
+//     v3.6까지는 수 MB JSON을 JSON.parse → JSON.stringify 두 번 거쳤고, 이 구간이 응답 시간의 대부분이었습니다.
+//   - ?mode=cache&part=summary : meta + baseRows + productRows 만 (첫 화면용, 작고 빠름)
+//     ?mode=cache&part=quality : meta + qualityRows 만 (품질 패널이 뒤에서 따로 받음)
+//     ?mode=cache             : 예전과 같은 전체 응답 (구 대시보드 호환)
+//   - CacheService(스크립트 캐시)에 섹션별 JSON 텍스트를 6시간 보관합니다. 캐시가 있으면 시트를 읽지 않습니다.
+//     refreshDashboardCache()가 시트를 쓸 때 같이 갱신하므로 사람이 신경 쓸 것은 없습니다.
+//   - 시트를 읽어야 할 때도 요청한 섹션의 행만 읽습니다(part=summary면 qualityRows 청크를 읽지 않음).
+//   - meta에 servedFrom / servedMs 가 실려 옵니다. 대시보드 사이드바에서 어디가 느린지 바로 보입니다.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -75,24 +86,24 @@ function onOpen() {
 function doGet(e) {
   try {
     var params = (e && e.parameter) ? e.parameter : {};
-    var data;
 
     // 기존 대시보드 호환성을 위해 기본값은 기존 전체 orders 응답으로 유지합니다.
-    // 새 HTML에서만 ?mode=cache를 붙여 요약 캐시를 받습니다.
+    // 새 HTML은 ?mode=cache&part=summary → ?mode=cache&part=quality 두 번에 나눠 받습니다.
     if (params.mode === 'cache') {
-      data = getDashboardCache();
-    } else {
-      data = getProcessedData();
+      return jsonOutput_(getDashboardCacheText_(params.part));
     }
-
-    return ContentService.createTextOutput(JSON.stringify(data))
-      .setMimeType(ContentService.MimeType.JSON);
+    return jsonOutput_(JSON.stringify(getProcessedData()));
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
+    return jsonOutput_(JSON.stringify({
       error: true,
       message: err.message
-    })).setMimeType(ContentService.MimeType.JSON);
+    }));
   }
+}
+
+function jsonOutput_(text) {
+  return ContentService.createTextOutput(text)
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // 메뉴 실행 결과를 사용자에게 표시합니다.
@@ -695,7 +706,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.6'
+      version: 'v3.7'
     }
   };
 }
@@ -718,7 +729,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.6'
+      version: 'v3.7'
     }
   };
 }
@@ -741,19 +752,184 @@ function refreshDashboardCacheMenu() {
   });
 }
 
+// 객체가 필요한 내부 용도(testGetData 등). 웹 응답은 getDashboardCacheText_를 씁니다.
 function getDashboardCache() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('dashboard_cache');
+  return JSON.parse(getDashboardCacheText_('all'));
+}
 
-  if (sheet && sheet.getLastRow() > 1) {
-    return readDashboardCacheSheet_(sheet);
+// 캐시 섹션 이름과 시트/스크립트 캐시에 저장되는 순서
+var CACHE_SECTIONS = ['meta', 'baseRows', 'productRows', 'qualityRows'];
+
+// part → 응답에 실을 섹션. 알 수 없는 값은 전체 응답(구 대시보드 호환).
+function cacheSectionsForPart_(part) {
+  if (part === 'summary') return ['meta', 'baseRows', 'productRows'];
+  if (part === 'quality') return ['meta', 'qualityRows'];
+  if (part === 'meta') return ['meta'];
+  return CACHE_SECTIONS.slice();
+}
+
+// 요청한 섹션의 JSON 텍스트를 구해 응답 문자열을 이어 붙입니다.
+// 큰 배열을 JSON.parse/JSON.stringify 하지 않는 것이 핵심입니다.
+function getDashboardCacheText_(part) {
+  var t0 = Date.now();
+  var sections = cacheSectionsForPart_(part);
+  var servedFrom = 'script_cache';
+  var texts = readCacheTextsFromScriptCache_(sections);
+
+  if (!texts) {
+    servedFrom = 'sheet';
+    texts = readCacheTextsFromSheet_(sections);
   }
 
-  var processed = getProcessedData();
-  var cache = buildDashboardCacheFromOrders_(processed.orders || []);
-  cache.meta.source = 'built_on_demand';
-  cache.meta.warning = 'dashboard_cache sheet was missing; run refreshProcessedData once';
-  return { dashboardCache: cache, meta: cache.meta };
+  if (!texts) {
+    // dashboard_cache 시트가 없음 → 즉석 생성 (느림. refreshProcessedData 1회 실행이 정답)
+    servedFrom = 'built_on_demand';
+    var processed = getProcessedData();
+    var built = buildDashboardCacheFromOrders_(processed.orders || []);
+    built.meta.source = 'built_on_demand';
+    built.meta.warning = 'dashboard_cache sheet was missing; run refreshProcessedData once';
+    texts = {};
+    for (var b = 0; b < sections.length; b++) {
+      texts[sections[b]] = JSON.stringify(built[sections[b]] || null);
+    }
+  }
+
+  // meta만 작으니 파싱해서 서빙 정보를 덧붙입니다.
+  var meta = {};
+  try { meta = JSON.parse(texts.meta || '{}') || {}; } catch (err) { meta = {}; }
+  meta.part = part || 'all';
+  meta.servedFrom = servedFrom;
+  meta.servedAt = new Date().toISOString();
+  meta.servedMs = Date.now() - t0;
+  var metaText = JSON.stringify(meta);
+
+  var inner = ['"meta":' + metaText];
+  for (var i = 0; i < sections.length; i++) {
+    var name = sections[i];
+    if (name === 'meta') continue;
+    inner.push('"' + name + '":' + (texts[name] || '[]'));
+  }
+
+  return '{"dashboardCache":{' + inner.join(',') + '},"meta":' + metaText + '}';
+}
+
+// ---------- 스크립트 캐시 (CacheService) ----------
+// 섹션별로 'dc:<section>' 인덱스 키(생성 시각·조각 수)와 'dc:<section>:<gen>:<i>' 조각 키를 둡니다.
+// 조각을 먼저 쓰고 인덱스를 마지막에 써서, 읽는 쪽이 반쯤 갱신된 상태를 보지 않게 합니다.
+var SCRIPT_CACHE_TTL_SEC = 21600;     // 6시간 (CacheService 최대)
+var SCRIPT_CACHE_CHUNK_CHARS = 30000; // 한글 3바이트 기준 90KB < 100KB 제한
+
+function scriptCache_() {
+  try { return CacheService.getScriptCache(); } catch (err) { return null; }
+}
+
+function readCacheTextsFromScriptCache_(sections) {
+  var cache = scriptCache_();
+  if (!cache) return null;
+
+  try {
+    var indexKeys = sections.map(function(s) { return 'dc:' + s; });
+    var indexes = cache.getAll(indexKeys);
+    var chunkKeys = [];
+    var plan = {};
+
+    for (var i = 0; i < sections.length; i++) {
+      var raw = indexes['dc:' + sections[i]];
+      if (!raw) return null;
+      var idx = JSON.parse(raw);
+      var keys = [];
+      for (var p = 0; p < idx.parts; p++) keys.push('dc:' + sections[i] + ':' + idx.gen + ':' + p);
+      plan[sections[i]] = keys;
+      chunkKeys = chunkKeys.concat(keys);
+    }
+
+    var chunks = {};
+    for (var off = 0; off < chunkKeys.length; off += 100) {
+      var got = cache.getAll(chunkKeys.slice(off, off + 100));
+      for (var k in got) chunks[k] = got[k];
+    }
+
+    var texts = {};
+    for (var s = 0; s < sections.length; s++) {
+      var parts = plan[sections[s]];
+      var buf = [];
+      for (var c = 0; c < parts.length; c++) {
+        if (chunks[parts[c]] === undefined || chunks[parts[c]] === null) return null; // 일부 만료 → 시트로
+        buf.push(chunks[parts[c]]);
+      }
+      texts[sections[s]] = buf.join('');
+    }
+    return texts;
+  } catch (err) {
+    Logger.log('script cache read skipped: ' + err.message);
+    return null;
+  }
+}
+
+function writeCacheTextsToScriptCache_(texts) {
+  var cache = scriptCache_();
+  if (!cache) return;
+
+  try {
+    var gen = String(Date.now());
+    for (var name in texts) {
+      var text = texts[name] || '';
+      var parts = Math.max(1, Math.ceil(text.length / SCRIPT_CACHE_CHUNK_CHARS));
+      var batch = {};
+      var count = 0;
+      for (var p = 0; p < parts; p++) {
+        batch['dc:' + name + ':' + gen + ':' + p] =
+          text.substring(p * SCRIPT_CACHE_CHUNK_CHARS, (p + 1) * SCRIPT_CACHE_CHUNK_CHARS);
+        count++;
+        if (count >= 50) { cache.putAll(batch, SCRIPT_CACHE_TTL_SEC); batch = {}; count = 0; }
+      }
+      if (count > 0) cache.putAll(batch, SCRIPT_CACHE_TTL_SEC);
+      cache.put('dc:' + name, JSON.stringify({ gen: gen, parts: parts, chars: text.length }), SCRIPT_CACHE_TTL_SEC);
+    }
+  } catch (err) {
+    // 스크립트 캐시는 가속용일 뿐입니다. 실패해도 시트 경로가 그대로 동작합니다.
+    Logger.log('script cache write skipped: ' + err.message);
+  }
+}
+
+// ---------- 시트 읽기 (요청한 섹션의 행만) ----------
+function readCacheTextsFromSheet_(sections) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('dashboard_cache');
+  if (!sheet || sheet.getLastRow() < 2) return null;
+
+  var lastRow = sheet.getLastRow();
+  // A:B(section, part)만 먼저 읽습니다. json 열은 필요한 행 범위만 읽습니다.
+  var head = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  var wanted = {};
+  for (var w = 0; w < sections.length; w++) wanted[sections[w]] = { first: -1, last: -1 };
+
+  for (var i = 0; i < head.length; i++) {
+    var name = String(head[i][0] || '').trim();
+    if (!wanted[name]) continue;
+    if (wanted[name].first < 0) wanted[name].first = i;
+    wanted[name].last = i;
+  }
+
+  var texts = {};
+  var filled = {};
+  for (var s = 0; s < sections.length; s++) {
+    var range = wanted[sections[s]];
+    if (range.first < 0) { texts[sections[s]] = ''; continue; }
+    var rows = sheet.getRange(range.first + 2, 1, range.last - range.first + 1, 3).getValues();
+    var pieces = [];
+    for (var r = 0; r < rows.length; r++) {
+      if (String(rows[r][0] || '').trim() !== sections[s]) continue;
+      pieces.push({ part: Number(rows[r][1]) || 0, text: String(rows[r][2] || '') });
+    }
+    pieces.sort(function(a, b) { return a.part - b.part; });
+    texts[sections[s]] = pieces.map(function(p) { return p.text; }).join('');
+    filled[sections[s]] = texts[sections[s]];
+  }
+
+  // 다음 요청부터는 시트를 읽지 않도록 스크립트 캐시를 채워 둡니다.
+  writeCacheTextsToScriptCache_(filled);
+  return texts;
 }
 
 function refreshDashboardCache(ss, processedRows) {
@@ -914,7 +1090,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.6.2',
+    version: 'v3.7',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -1020,11 +1196,13 @@ function writeDashboardCache_(ss, cache) {
   if (sheet.getFilter()) sheet.getFilter().remove();
   sheet.clear();
 
+  var texts = {};
   var rows = [['section', 'part', 'json']];
-  appendJsonChunks_(rows, 'meta', cache.meta);
-  appendJsonChunks_(rows, 'baseRows', cache.baseRows);
-  appendJsonChunks_(rows, 'productRows', cache.productRows);
-  appendJsonChunks_(rows, 'qualityRows', cache.qualityRows);
+  for (var s = 0; s < CACHE_SECTIONS.length; s++) {
+    var name = CACHE_SECTIONS[s];
+    texts[name] = JSON.stringify(cache[name] || null);
+    appendJsonChunks_(rows, name, texts[name]);
+  }
 
   setValuesChunked_(sheet, 1, 1, rows, 1000);
   sheet.getRange(1, 1, 1, 3)
@@ -1043,10 +1221,13 @@ function writeDashboardCache_(ss, cache) {
   } catch (err) {
     // 숨김 실패는 대시보드 기능에 영향이 없어 무시합니다.
   }
+
+  // 웹 요청이 시트 대신 바로 읽도록 스크립트 캐시도 같은 내용으로 갱신합니다.
+  writeCacheTextsToScriptCache_(texts);
 }
 
-function appendJsonChunks_(rows, section, value) {
-  var text = JSON.stringify(value || null);
+function appendJsonChunks_(rows, section, text) {
+  text = String(text || '');
   var chunkSize = 45000;
   var part = 0;
 
@@ -1058,42 +1239,6 @@ function appendJsonChunks_(rows, section, value) {
   if (text.length === 0) {
     rows.push([section, 0, '']);
   }
-}
-
-function readDashboardCacheSheet_(sheet) {
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-  var buckets = {};
-
-  for (var i = 0; i < data.length; i++) {
-    var section = String(data[i][0] || '').trim();
-    if (!section) continue;
-    if (!buckets[section]) buckets[section] = [];
-    buckets[section].push({
-      part: Number(data[i][1]) || 0,
-      text: String(data[i][2] || '')
-    });
-  }
-
-  var cache = {};
-  for (var key in buckets) {
-    buckets[key].sort(function(a, b) {
-      return a.part - b.part;
-    });
-    var jsonText = buckets[key].map(function(part) {
-      return part.text;
-    }).join('');
-    cache[key] = jsonText ? JSON.parse(jsonText) : null;
-  }
-
-  cache.meta = cache.meta || {};
-  cache.baseRows = cache.baseRows || [];
-  cache.productRows = cache.productRows || [];
-  cache.qualityRows = cache.qualityRows || [];
-
-  return {
-    dashboardCache: cache,
-    meta: cache.meta
-  };
 }
 
 function normalizeDateOnly_(value) {

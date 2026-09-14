@@ -10,7 +10,7 @@
 - 캐시 테스트 대시보드: `sales-progress-dashboard-prototype-20260512-cache.html`
 - 기존 프로토타입: `sales-progress-dashboard-prototype-20260512.html`
 - 데이터 원본: Google Sheets `raw_orders`, `가공_데이터`, `map_channel`, `map_product`, `map_cost`
-- Apps Script 현재 기준: **v3.6** — `apps-script-v3.6.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
+- Apps Script 현재 기준: **v3.7** — `apps-script-v3.7.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
 
 `index.html`은 대시보드 본문을 gzip + base64로 압축해 런타임에 풀어 쓰는 구조입니다.
 그래서 `index.html`은 직접 수정하지 않습니다. 수정은 항상 아래 순서로 합니다.
@@ -23,6 +23,66 @@ python3 build_index.py
 ```
 
 운영 배포 파일은 보호 대상입니다. 검증은 `dashboard.src.html`을 로컬에서 열어 먼저 합니다.
+
+## 2026-09-14 첫 로딩 속도 — Apps Script v3.7 + 대시보드 2단계 로딩
+
+### 왜 느려졌는가
+
+`?mode=cache` 응답 한 번에 `baseRows + productRows + qualityRows`가 전부 실려 왔고, 서버는 그걸 만들기 위해
+`dashboard_cache` 시트의 JSON 텍스트를 **JSON.parse 한 뒤 다시 JSON.stringify** 했습니다.
+9월 3일 전체 재생성 이후 원본이 10만 행을 넘고 `qualityRows`에 합배송 분할 행(1.2만+)이 들어가면서
+이 응답이 수 MB로 커졌고, Apps Script에서 수 MB를 두 번 직렬화하는 구간이 응답 시간을 잡아먹었습니다.
+행이 늘수록 선형으로 느려지는 구조라 "갑자기" 체감되는 것이 자연스럽습니다.
+(이 세션에서는 프록시 정책 때문에 `script.google.com`에 직접 접속할 수 없어 실측은 못 했습니다. 아래 사이드바 진단 수치로 확인하세요.)
+
+### 고친 것
+
+Apps Script (`apps-script-v3.7.js`)
+
+| 항목 | v3.6 | v3.7 |
+|---|---|---|
+| 응답 조립 | 시트 JSON → parse → stringify | 시트 JSON 텍스트를 **그대로 이어 붙임** (큰 배열은 파싱하지 않음) |
+| 첫 화면 요청 | 전체 (`mode=cache`) | `mode=cache&part=summary` = meta + baseRows + productRows 만 |
+| 품질 상세 | 첫 응답에 포함 | `mode=cache&part=quality` 로 **첫 화면 뒤에 따로** |
+| 시트 읽기 | 모든 청크 행 | 요청한 섹션의 행만 (A:B열로 위치 찾고 json 열은 그 범위만) |
+| 스크립트 캐시 | 없음 | `CacheService` 6시간. 캐시 갱신 시 같이 채움. 있으면 시트를 아예 안 읽음 |
+| 진단 | 없음 | `meta.servedFrom` (`script_cache` / `sheet` / `built_on_demand`), `meta.servedMs` |
+
+`mode=cache` 만 붙인 예전 요청은 예전과 같은 전체 응답을 돌려줍니다(구 대시보드·캐시 테스트 페이지 호환).
+
+대시보드 (`dashboard.src.html`)
+
+- **데이터 요청을 `<head>` 최상단에서 가장 먼저 시작**합니다. 예전에는 `window.load`(Chart.js·폰트까지 다 받은 뒤)에서야 요청을 보냈습니다.
+- Chart.js는 `defer`, 폰트 CSS는 비차단 로드. 로딩 화면이 즉시 뜨고 CDN이 늦어도 데이터 요청은 병렬로 진행됩니다.
+- 2단계 로딩: 요약이 오면 바로 그리고, 품질 상세는 뒤에서 받아 품질 패널만 다시 그립니다. 그동안 패널에는 "불러오는 중" 표시.
+- 보이는 페이지만 렌더합니다(담당자 페이지는 전환할 때 그림).
+- 사이드바 하단에 **구간별 소요 시간**이 뜹니다: `요약 2.0s (1.1MB · script_cache) · 품질 5.1s (5.8MB) · 렌더 85ms`.
+  콘솔(`[ourbox]`)에는 ttfb / 다운로드 / 파싱 / 서버 처리 시간이 따로 찍힙니다. 느리면 이 숫자로 어디가 느린지 판단합니다.
+- Apps Script가 `{error:true}`를 돌려주면 그 메시지를 그대로 보여줍니다(예전에는 "주문 데이터가 없습니다"로 뭉개짐).
+- Chart.js CDN이 실패해도 KPI·표는 정상 표시하고 차트만 비웁니다.
+- `API_URL`은 이제 `<head>` 상단 `window.OURBOX_API_URL` 한 곳입니다.
+- 타임아웃 220초 → 120초.
+
+### 배포 순서 (둘 다 해야 효과가 납니다)
+
+1. Apps Script 편집기 → 기존 코드 전체 선택 → `apps-script-v3.7.js` 내용으로 교체 → 저장
+2. **배포 관리 → 기존 배포 → 새 버전** (URL 유지)
+3. 시트 메뉴 `📊 아워박스` → `⚡ 대시보드 캐시만 갱신` 1회 (스크립트 캐시를 채웁니다. 안 해도 첫 요청이 시트를 읽으면서 채웁니다)
+4. `index.html`은 이 커밋에 이미 빌드돼 있습니다. GitHub Pages 반영 후 새로고침
+5. 사이드바 하단 수치 확인. `servedFrom`이 `sheet`면 스크립트 캐시가 비어 있던 것이고 다음 요청부터 `script_cache`여야 합니다
+
+Apps Script를 아직 v3.7로 안 올린 상태에서 새 `index.html`만 배포해도 동작은 합니다(전체 응답을 한 번에 받음). 다만 속도 개선의 핵심은 서버 쪽이라 반드시 올리세요.
+
+### 합성 데이터 검증 (실측 아님)
+
+raw 10만 행 규모로 합성한 캐시(요약 1.1MB / 품질 5.8MB, 왕복 1.2초 + 1MB당 0.6초 가정)를 headless Chromium에 물려 비교했습니다.
+
+| 경로 | 첫 화면 | 품질 패널까지 |
+|---|---|---|
+| 구 방식 (전체 응답 1회) | 6.2초 | 6.2초 |
+| v3.7 (요약 → 품질) | 2.1초 | 7.4초 |
+
+서버 직렬화 제거 효과는 여기에 포함돼 있지 않습니다(브라우저 테스트라 Apps Script 실행 시간은 모사하지 않음). 실제 값은 배포 후 사이드바 수치로 확인하세요.
 
 ## 2026-05-12 작업 요약
 

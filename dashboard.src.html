@@ -4,9 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>B2C 판매데이터 대시보드</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script>
+  // ── 데이터 요청은 여기서 가장 먼저 시작합니다 (Chart.js·폰트 로딩과 병렬) ──
+  // Apps Script 웹앱 URL. 새 배포를 만들면 이 값 하나만 바꾸면 됩니다.
+  window.OURBOX_API_URL='https://script.google.com/macros/s/AKfycbwi5lQEGI8caIRxVmJWKPaad0G07cAKWkXF52YYzpKJhJ2dV21QggZ1jdx3nxHP-eCpNQ/exec';
+  window.OURBOX_LOAD_TIMEOUT_MS=120000;
+  window.ourboxApiUrl=function(part){var u=window.OURBOX_API_URL, j=u.indexOf('?')>=0?'&':'?'; return u+j+'mode=cache&part='+part+'&t='+Date.now()};
+  window.ourboxStartFetch=function(part){var c=new AbortController(), t0=performance.now();
+    var p=fetch(window.ourboxApiUrl(part),{cache:'no-store',signal:c.signal});
+    return {promise:p,controller:c,startedAt:t0,part:part}};
+  window.OURBOX_SUMMARY_FETCH=window.ourboxStartFetch('summary');
+  </script>
+  <!-- defer: HTML 파싱을 막지 않아 로딩 화면이 즉시 뜹니다. loadData()는 DOMContentLoaded(= defer 스크립트 실행 후)에 시작하므로 Chart는 그때 준비돼 있습니다. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" media="print" onload="this.media='all'">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
     :root{--bg:#f4f6f9;--panel:#fff;--line:#dde3ea;--soft:#edf1f5;--text:#172033;--muted:#687386;--nav:#102033;--blue:#2563eb;--green:#10a55a;--amber:#d98600;--red:#dc2626;--slate:#64748b;--shadow:0 8px 24px rgba(16,32,51,.06)}
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:0}
@@ -42,7 +59,7 @@
   </style>
 </head>
 <body>
-<div class="loader" id="loader"><div class="loader-card"><div class="spin"></div><div id="loaderText">데이터 로딩 중</div><div class="load-sub" id="loaderSub">Google Sheets API 응답을 기다리는 중입니다.</div></div></div>
+<div class="loader" id="loader"><div class="loader-card"><div class="spin"></div><div id="loaderText">데이터 로딩 중</div><div class="load-sub" id="loaderSub">요약 캐시를 받는 중입니다. 보통 10초 안에 열립니다.</div></div></div>
 <div class="app">
   <aside class="side">
     <div class="brand"><strong>아워박스</strong><span>Sales Progress Prototype</span></div>
@@ -114,10 +131,11 @@
   </div></main>
 </div>
 <script>
-const API_URL='https://script.google.com/macros/s/AKfycbwi5lQEGI8caIRxVmJWKPaad0G07cAKWkXF52YYzpKJhJ2dV21QggZ1jdx3nxHP-eCpNQ/exec';
+const API_URL=window.OURBOX_API_URL; // 실제 값은 <head> 상단 window.OURBOX_API_URL 하나만 고칩니다
 const QUALITY_DETAIL_LIMIT=300;
 const MAP_CANDIDATE_LIMIT=50;
 let RAW_ROWS=[], ALL=[], PRODUCT_CACHE=[], QUALITY_ROWS=[], DATA_MODE='orders', charts={}, activeIssue='channelUnmapped', currentPage='overview';
+let QUALITY_PENDING=false, QUALITY_ERROR='', QUALITY_LOADING=false, SERVER_META={}, LOAD_STATS={};
 let MAP_CANDIDATES={def:null,list:[]}, ISSUE_DETAIL_ROWS=[];
 let chartGrain={daily:'day',channelDaily:'day',managerDaily:'day'};
 const $=id=>document.getElementById(id);
@@ -144,7 +162,17 @@ function sum(rows,k){return rows.reduce((a,r)=>a+(r[k]||0),0)}
 function orderCount(rows){return rows.some(r=>r.orders!==undefined)?sum(rows,'orders'):new Set(rows.map(r=>r.id).filter(Boolean)).size}
 function cleanCacheRow(r){return {sheetRow:NUM(r.sheetRow),id:String(r.id||r.orderId||''),item:r.item||r.itemName||'',qty:NUM(r.qty||r.quantity),revenue:NUM(r.revenue||r.sales),ship:NUM(r.ship),shop:r.shop||r.shopName||'',date:parseDate(r.date||r.orderDate),channel:r.channel||r.channelGroup||'미매핑',product:r.product||r.stdProduct||'미매핑',category:r.category||'미매핑',settlement:NUM(r.settlement),cost:NUM(r.cost),shipCost:NUM(r.shipCost),margin:NUM(r.margin),manager:r.manager||'미지정',orders:NUM(r.orders||r.orderCount||r.count),issueKeys:String(r.issueKeys||''),issueSet:r.issueKeys?new Set(String(r.issueKeys).split(',').filter(Boolean)):null}}
 function buildBaseCache(rows){let m=new Map(); rows.forEach(r=>{let key=[r.date,r.channel,r.category,r.manager].join('|||'); if(!m.has(key))m.set(key,{date:r.date,channel:r.channel,category:r.category,manager:r.manager,qty:0,revenue:0,settlement:0,cost:0,shipCost:0,margin:0,orders:0,_ids:new Set()}); let o=m.get(key); o.qty+=r.qty||0; o.revenue+=r.revenue||0; o.settlement+=r.settlement||0; o.cost+=r.cost||0; o.shipCost+=r.shipCost||0; o.margin+=r.margin||0; if(r.id)o._ids.add(r.id)}); return [...m.values()].map(o=>{o.orders=o._ids.size; delete o._ids; return o})}
-function normalizeApiResponse(json){let cache=json&& !Array.isArray(json) ? (json.dashboardCache||json.cache||json.summary) : null; if(cache&&Array.isArray(cache.baseRows)){RAW_ROWS=[]; ALL=cache.baseRows.map(cleanCacheRow).filter(r=>r.date); PRODUCT_CACHE=(cache.productRows||[]).map(cleanCacheRow).filter(r=>r.date); QUALITY_ROWS=(cache.qualityRows||[]).map(cleanCacheRow).filter(r=>r.date); DATA_MODE='server-cache'; return} let src=Array.isArray(json)?json:(json.orders||json.data||json.rows||[]); RAW_ROWS=src.map(clean).filter(r=>r.id&&r.date); assignIssueSets(RAW_ROWS); ALL=buildBaseCache(RAW_ROWS); PRODUCT_CACHE=[]; QUALITY_ROWS=[]; DATA_MODE='client-cache'}
+function normalizeApiResponse(json){if(json&&json.error)throw new Error('Apps Script 오류: '+(json.message||'unknown')); let cache=json&& !Array.isArray(json) ? (json.dashboardCache||json.cache||json.summary) : null; if(cache&&Array.isArray(cache.baseRows)){RAW_ROWS=[]; SERVER_META=cache.meta||json.meta||{}; ALL=cache.baseRows.map(cleanCacheRow).filter(r=>r.date); PRODUCT_CACHE=(cache.productRows||[]).map(cleanCacheRow).filter(r=>r.date); if(Array.isArray(cache.qualityRows)){QUALITY_ROWS=cache.qualityRows.map(cleanCacheRow).filter(r=>r.date); QUALITY_PENDING=false} else {QUALITY_ROWS=[]; QUALITY_PENDING=true} DATA_MODE='server-cache'; return} let src=Array.isArray(json)?json:(json.orders||json.data||json.rows||[]); RAW_ROWS=src.map(clean).filter(r=>r.id&&r.date); assignIssueSets(RAW_ROWS); ALL=buildBaseCache(RAW_ROWS); PRODUCT_CACHE=[]; QUALITY_ROWS=[]; QUALITY_PENDING=false; DATA_MODE='client-cache'}
+// 품질 상세(qualityRows)는 첫 화면 뒤에 따로 받습니다. 구 Apps Script(전체 응답)면 이 함수는 호출되지 않습니다.
+async function loadQualityRows(){if(!QUALITY_PENDING||QUALITY_LOADING)return; QUALITY_LOADING=true; QUALITY_ERROR=''; renderQualityState(); let req=window.ourboxStartFetch('quality'), timer=setTimeout(()=>req.controller.abort(),window.OURBOX_LOAD_TIMEOUT_MS);
+  try{let r=await readApiResponse(req); QUALITY_ROWS=(r.json.dashboardCache&&r.json.dashboardCache.qualityRows||[]).map(cleanCacheRow).filter(x=>x.date); QUALITY_PENDING=false; LOAD_STATS.quality=r.stats; let t0=performance.now(); if(currentPage==='overview')renderQuality(rawFiltered(),true); LOAD_STATS.quality.renderMs=Math.round(performance.now()-t0)}
+  catch(e){QUALITY_ERROR=e.name==='AbortError'?'품질 상세 응답 시간 초과':(e.message||String(e)); console.warn('quality load failed',e)}
+  finally{clearTimeout(timer); QUALITY_LOADING=false; updateSideMeta(); if(QUALITY_ERROR&&currentPage==='overview')renderQualityState()}}
+// 응답 읽기 + 구간별 소요 시간 기록 (어디가 느린지 사이드바·콘솔에서 확인)
+async function readApiResponse(req){let res=await req.promise, ttfb=performance.now()-req.startedAt; if(!res.ok)throw new Error('HTTP '+res.status); let text=await res.text(), downloaded=performance.now()-req.startedAt, json; try{json=JSON.parse(text)}catch(e){throw new Error('JSON 파싱 실패 (응답 앞부분: '+text.slice(0,80).replace(/\s+/g,' ')+')')} let parsed=performance.now()-req.startedAt; let meta=json&&json.meta||{}; let stats={part:req.part,ttfbMs:Math.round(ttfb),downloadMs:Math.round(downloaded-ttfb),parseMs:Math.round(parsed-downloaded),totalMs:Math.round(parsed),bytes:text.length,serverMs:meta.servedMs,servedFrom:meta.servedFrom}; console.log('[ourbox] '+req.part,stats); return {json,stats}}
+function fmtMs(ms){return ms>=1000?(ms/1000).toFixed(1)+'s':Math.round(ms)+'ms'}
+function fmtBytes(n){return n>=1048576?(n/1048576).toFixed(1)+'MB':Math.round(n/1024)+'KB'}
+function updateSideMeta(){let s=LOAD_STATS, parts=[]; if(s.summary)parts.push(`요약 ${fmtMs(s.summary.totalMs)} (${fmtBytes(s.summary.bytes)}${s.summary.servedFrom?' · '+s.summary.servedFrom:''})`); if(s.quality)parts.push(`품질 ${fmtMs(s.quality.totalMs)} (${fmtBytes(s.quality.bytes)})`); else if(QUALITY_LOADING)parts.push('품질 상세 로딩 중'); else if(QUALITY_ERROR)parts.push('품질 상세 실패'); if(s.summary&&s.summary.renderMs!==undefined)parts.push(`렌더 ${fmtMs(s.summary.renderMs)}`); $('sideMeta').innerHTML=(DATA_MODE==='server-cache'?`${ALL.length.toLocaleString('ko-KR')} summary rows`:`${RAW_ROWS.length.toLocaleString('ko-KR')} raw → ${ALL.length.toLocaleString('ko-KR')} summary`)+(parts.length?'<br>'+parts.map(html).join(' · '):'')}
 function group(rows,key){let m=new Map(); rows.forEach(r=>{let k=typeof key==='function'?key(r):r[key]; if(!m.has(k))m.set(k,[]); m.get(k).push(r)}); return m}
 function weekStart(s){let d=asDate(s), day=d.getDay(), diff=day===0?-6:1-day; d.setDate(d.getDate()+diff); return formatDate(d)}
 function monthStart(s){return String(s||'').slice(0,7)+'-01'}
@@ -182,7 +210,8 @@ function applyTarget(){let saved=localStorage.getItem(targetKey()); $('targetInp
 function saveTarget(){localStorage.setItem(targetKey(),$('targetInput').value||0); $('targetSource').textContent='브라우저 저장 목표'; renderAll()}
 function handleDateChange(){clearTimeout(dateInputTimer); dateInputTimer=setTimeout(()=>{let from=$('dateFrom').value,to=$('dateTo').value; if(!dashboardDateOk(from)||!dashboardDateOk(to))return; if(from>to){let active=document.activeElement&&document.activeElement.id; if(active==='dateFrom')$('dateTo').value=from; else $('dateFrom').value=to} refreshFilterOptions(); applyTarget(); renderAll()},250)}
 function resetFilters(){['channelFilter','categoryFilter','managerFilter'].forEach(id=>$(id).value='ALL'); refreshFilterOptions(); applyTarget(); renderAll()}
-function setChart(id,cfg){let el=$(id); if(!el)return; if(charts[id])charts[id].destroy(); charts[id]=new Chart(el,cfg)}
+function setChart(id,cfg){let el=$(id); if(!el)return; if(typeof Chart==='undefined'){chartLibMissing(); return} if(charts[id])charts[id].destroy(); charts[id]=new Chart(el,cfg)}
+let chartWarned=false; function chartLibMissing(){if(chartWarned)return; chartWarned=true; console.warn('[ourbox] Chart.js 로드 실패 — 차트 없이 표·KPI만 표시'); let el=$('errorPanel'); el.style.display='block'; el.innerHTML='<b>차트 라이브러리(Chart.js CDN)를 불러오지 못했습니다.</b> 숫자·표는 정상이며 차트만 비어 있습니다. 네트워크 확인 후 새로고침하세요.'}
 function commonScale(){return {y:{ticks:{callback:SHORT},grid:{color:'#edf1f5'}},x:{grid:{display:false},ticks:{maxTicksLimit:18}}}}
 function emptyTable(id,msg='데이터 없음'){$(id).innerHTML=`<tbody><tr><td class="empty">${msg}</td></tr></tbody>`}
 function setStatus(kind,text){let el=$('statusPill'); el.className='pill status '+kind; el.textContent=text}
@@ -191,20 +220,23 @@ function hideLoader(){$('loader').style.display='none'}
 function showError(msg){$('errorPanel').style.display='block'; $('errorPanel').innerHTML=msg}
 function clearError(){$('errorPanel').style.display='none'; $('errorPanel').innerHTML=''}
 async function loadData(){
-  clearError(); showLoader('데이터 로딩 중','Google Sheets API 응답을 기다리는 중입니다. 데이터가 커서 2~3분 걸릴 수 있습니다.'); setStatus('loading','연결 중');
-  let controller=new AbortController(), slow1=setTimeout(()=>$('loaderSub').textContent='Apps Script 응답이 늦습니다. 계속 기다리는 중입니다.',25000), slow2=setTimeout(()=>$('loaderSub').textContent='아직 데이터 생성 중입니다. 완료되면 자동으로 화면이 열립니다.',90000), timeout=setTimeout(()=>controller.abort(),220000);
+  clearError(); showLoader('데이터 로딩 중','요약 캐시를 받는 중입니다. 보통 10초 안에 열립니다.'); setStatus('loading','연결 중');
+  // <head>에서 이미 시작한 요청이 있으면 그대로 이어받고(첫 로딩), 새로고침 버튼이면 새로 요청합니다.
+  let req=window.OURBOX_SUMMARY_FETCH||window.ourboxStartFetch('summary'); window.OURBOX_SUMMARY_FETCH=null;
+  let slow1=setTimeout(()=>$('loaderSub').textContent='Apps Script 응답이 늦습니다 (10초 경과). 계속 기다리는 중입니다.',10000), slow2=setTimeout(()=>$('loaderSub').textContent='30초 경과. Apps Script 웹앱이 잠들었다 깨어나는 중이거나 시트 읽기가 느린 상태입니다.',30000), timeout=setTimeout(()=>req.controller.abort(),window.OURBOX_LOAD_TIMEOUT_MS);
   try{
-    let joiner=API_URL.indexOf('?')>=0?'&':'?';
-    let res=await fetch(API_URL+joiner+'mode=cache&t='+Date.now(),{cache:'no-store',signal:controller.signal});
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    let json=await res.json();
-    normalizeApiResponse(json);
-    if(!ALL.length)throw new Error('응답에 주문 데이터가 없습니다');
-    initControls(); setStatus('',DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더'); $('sideStatus').textContent='Google Sheets 연결 완료'; $('sideMeta').textContent=DATA_MODE==='server-cache'?`${ALL.length.toLocaleString('ko-KR')} summary rows`:`${RAW_ROWS.length.toLocaleString('ko-KR')} raw → ${ALL.length.toLocaleString('ko-KR')} summary`; renderAll();
+    let r=await readApiResponse(req);
+    normalizeApiResponse(r.json);
+    if(!ALL.length)throw new Error('응답에 주문 데이터가 없습니다'+(SERVER_META.warning?' ('+SERVER_META.warning+')':''));
+    let t0=performance.now();
+    initControls(); setStatus('',DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더'); $('sideStatus').textContent='Google Sheets 연결 완료'; renderAll();
+    r.stats.renderMs=Math.round(performance.now()-t0); LOAD_STATS={summary:r.stats}; updateSideMeta();
+    console.log('[ourbox] first paint '+fmtMs(performance.now())+' since navigation · server meta',SERVER_META);
+    if(QUALITY_PENDING)loadQualityRows();
   }catch(e){
-    setStatus('fail','연결 실패'); $('sideStatus').textContent='API 연결 실패';
-    let msg=e.name==='AbortError'?'API 응답이 220초를 넘겨 중단했습니다. Apps Script가 전체 5만 행을 생성하는 데 오래 걸리는 상태입니다.':'데이터를 불러오지 못했습니다: '+html(e.message);
-    showError(`<b>${msg}</b><br>새로고침으로 다시 시도할 수 있고, 화면은 더 이상 무한 로딩 상태로 남지 않습니다.`);
+    setStatus('fail','연결 실패'); $('sideStatus').textContent='API 연결 실패'; console.error('[ourbox] load failed',e);
+    let msg=e.name==='AbortError'?`API 응답이 ${Math.round(window.OURBOX_LOAD_TIMEOUT_MS/1000)}초를 넘겨 중단했습니다. Apps Script 실행 로그에서 doGet 소요 시간을 확인하세요.`:'데이터를 불러오지 못했습니다: '+html(e.message);
+    showError(`<b>${msg}</b><br>새로고침으로 다시 시도할 수 있습니다. 반복되면 시트 메뉴 📊 아워박스 → ⚡ 대시보드 캐시만 갱신 을 한 번 실행하세요.`);
   }finally{
     clearTimeout(slow1); clearTimeout(slow2); clearTimeout(timeout); hideLoader();
   }
@@ -212,7 +244,8 @@ async function loadData(){
 function initControls(){let ds=ALL.map(r=>r.date).sort(), latest=ds.at(-1), start=latest?latest.slice(0,8)+'01':''; if(!$('dateFrom').value)$('dateFrom').value=start; if(!$('dateTo').value)$('dateTo').value=latest; refreshFilterOptions(); applyTarget()}
 function switchPage(page){currentPage=page; document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page'+page[0].toUpperCase()+page.slice(1))); document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page)); $('pageTitle').textContent=page==='manager'?'담당자별 성과':'매출 진척도'; $('pageSub').textContent=page==='manager'?'채널 담당자 기준 매출, 마진, 주문 추이':'기간별 매출, 목표 달성률, 채널·상품 기여도'; renderAll()}
 function renderProductDetailPage(){let table=$('productDetailTable'); if(!table)return; let q=(($('productDetailSearch')&&$('productDetailSearch').value)||'').trim().toLowerCase(); let base=productRows(); let entries=[...group(base,'product')].map(([name,rs])=>({name,cat:rs[0]&&rs[0].category||'미분류',orders:orderCount(rs),qty:sum(rs,'qty'),rev:sum(rs,'revenue'),stl:sum(rs,'settlement'),cost:sum(rs,'cost'),mar:sum(rs,'margin')})).filter(e=>!q||String(e.name).toLowerCase().includes(q)||String(e.cat).toLowerCase().includes(q)).sort((a,b)=>b.rev-a.rev); if(!entries.length){emptyTable('productDetailTable','검색 결과 없음');return} let totals=entries.reduce((a,e)=>{a.orders+=e.orders;a.qty+=e.qty;a.rev+=e.rev;a.stl+=e.stl;a.cost+=e.cost;a.mar+=e.mar;return a},{orders:0,qty:0,rev:0,stl:0,cost:0,mar:0}); let body=entries.map(e=>{let rate=e.rev?e.mar/e.rev*100:0; return `<tr><td>${html(e.name)}</td><td>${html(e.cat)}</td><td class="r">${e.orders.toLocaleString('ko-KR')}건</td><td class="r">${e.qty.toLocaleString('ko-KR')}</td><td class="r">${KRW(e.rev)}</td><td class="r">${KRW(e.stl)}</td><td class="r">${KRW(e.cost)}</td><td class="r ${e.mar<0?'neg':''}">${KRW(e.mar)}</td><td class="r ${rate<0?'neg':''}">${rate.toFixed(1)}%</td></tr>`}).join(''); let totalRate=totals.rev?totals.mar/totals.rev*100:0; table.innerHTML=`<thead><tr><th>표준품목명</th><th>상품군</th><th class="r">주문건수</th><th class="r">수량</th><th class="r">매출</th><th class="r">정산액</th><th class="r">원가</th><th class="r">마진</th><th class="r">마진율</th></tr></thead><tbody>${body}<tr style="background:#1d3554;color:#fff;font-weight:900"><td>합계 (${entries.length.toLocaleString('ko-KR')}개 필터)</td><td></td><td class="r">${totals.orders.toLocaleString('ko-KR')}건</td><td class="r">${totals.qty.toLocaleString('ko-KR')}</td><td class="r">${KRW(totals.rev)}</td><td class="r">${KRW(totals.stl)}</td><td class="r">${KRW(totals.cost)}</td><td class="r">${KRW(totals.mar)}</td><td class="r">${totalRate.toFixed(1)}%</td></tr></tbody>`}
-function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), detailRows=rawFiltered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderProductDetailPage(); renderQuality(detailRows,QUALITY_ROWS.length>0||RAW_ROWS.length>0); renderManagerPage(rows)}
+// 보이는 페이지만 그립니다. 숨겨진 페이지는 switchPage()에서 다시 renderAll()이 돌 때 그려집니다.
+function renderAll(){if(!ALL.length)return; refreshFilterOptions(); let rows=filtered(), target=NUM($('targetInput').value); $('rangePill').textContent=`${$('dateFrom').value} ~ ${$('dateTo').value}`; if(currentPage==='manager'){renderManagerPage(rows); return} renderKpis(rows,target); renderCumulative(rows,target); renderChannelProgress(rows,target); renderDaily(rows); renderMoM(rows); renderChannelDaily(rows); renderProfitStructure(rows); renderProduct(productRows()); renderChannelTable(rows); renderProductDetailPage(); renderQuality(rawFiltered(),QUALITY_ROWS.length>0||RAW_ROWS.length>0)}
 function renderKpis(rows,target){let rev=sum(rows,'revenue'), mar=sum(rows,'margin'), orders=orderCount(rows), totalDays=daysBetween($('dateFrom').value,$('dateTo').value), dates=rows.map(r=>r.date).sort(), lastData=dates.at(-1)||$('dateFrom').value, today=formatDate(new Date()), cutoff=today<$('dateTo').value?today:$('dateTo').value; cutoff=lastData<cutoff?lastData:cutoff; let elapsed=Math.min(totalDays,Math.max(1,daysBetween($('dateFrom').value,cutoff))), progress=target?rev/target*100:0, forecast=elapsed?rev/elapsed*totalDays:0, stl=sum(rows,'settlement'), mr=rev?mar/rev*100:0, pr=prevRange(), prev=sameFilterRows(pr.from,pr.to), prevRev=sum(prev,'revenue'), diff=prevRev?(rev-prevRev)/prevRev*100:null; $('kRevenue').textContent=KRW(rev); $('kRevenueSub').textContent=diff===null?'전월 동기간 데이터 없음':`전월 동기 ${diff>=0?'+':''}${diff.toFixed(1)}%`; $('kProgress').textContent=progress.toFixed(1)+'%'; $('kProgressSub').textContent=`목표 ${KRW(target)}`; $('kForecast').textContent=KRW(forecast); $('kForecastSub').textContent=forecast>=target?'목표 초과 페이스':'목표 미달 페이스'; $('kSettlement').textContent=KRW(stl); $('kSettlementSub').textContent=`수수료 ${KRW(rev-stl)} 제외`; $('kMarginRate').textContent=mr.toFixed(1)+'%'; $('kMarginSub').textContent=`마진 ${KRW(mar)}`; $('kOrders').textContent=orders.toLocaleString('ko-KR')+'건'; $('kOrdersSub').textContent=`객단가 ${KRW(orders?rev/orders:0)}`; $('kProgress').parentElement.className='kpi '+(progress>=100?'good':progress>=75?'warn':''); $('kForecast').parentElement.className='kpi '+(forecast>=target?'good':'warn'); $('kMarginRate').parentElement.className='kpi '+(mr<0?'bad':mr<20?'warn':'good'); $('paceHint').textContent=`${elapsed}/${totalDays}일 경과 · 예상 ${SHORT(forecast)}원`}
 function renderCumulative(rows,target){let dates=dateList($('dateFrom').value,$('dateTo').value), by=group(rows,'date'), run=0, elapsedRows=new Set(rows.map(r=>r.date)), last=[...elapsedRows].sort().at(-1)||$('dateFrom').value, sales=[], goal=[]; dates.forEach((d,i)=>{run+=sum(by.get(d)||[],'revenue'); sales.push(d<=last?run:null); goal.push(target/dates.length*(i+1))}); setChart('cumChart',{type:'line',data:{labels:dates.map(d=>d.slice(5)),datasets:[{label:'누적 매출',data:sales,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.08)',fill:true,tension:.25,borderWidth:3,pointRadius:0},{label:'목표선',data:goal,borderColor:'#94a3b8',borderDash:[6,5],pointRadius:0}]},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.raw===null?'':c.dataset.label+': '+KRW(c.raw)}}},scales:commonScale()}})}
 function renderDaily(rows){let grain=chartGrain.daily||'day', agg=aggregateByGrain(rows,grain); updateGrainButtons('daily'); $('dailyChartTitle').textContent=grainLabel(grain)+' 매출 추이'; $('dailyHint').textContent=grainLabel(grain)+' 집계 · 매출 기준'; setChart('dailyChart',{type:'bar',data:{labels:agg.labels,datasets:[{label:'매출',data:agg.values,backgroundColor:'#2563eb',borderRadius:4}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>KRW(c.raw)}}},scales:commonScale()}})}
@@ -248,8 +281,10 @@ function assignIssueSets(rows){let totals=new Map(); rows.forEach(r=>{if(!r.id)r
 function currentIssueDef(){return activeIssue==='__all'?ALL_ISSUES:(issueDefs[activeIssue]||issueDefs.channelUnmapped)}
 function issueBadges(r){return Object.entries(issueDefs).filter(([,d])=>d.fn(r)).map(([k,d])=>`<span class="badge sm ${k===activeIssue&&!d.info?'amber':'gray'}">${d.short}</span>`).join('')}
 function issueNames(r){return Object.values(issueDefs).filter(d=>d.fn(r)).map(d=>d.name).join(' / ')}
+function renderQualityState(){let msg, hint; if(QUALITY_LOADING||QUALITY_PENDING&&!QUALITY_ERROR){msg='품질 상세 불러오는 중… (첫 화면과 별도로 받습니다)'; hint='품질 상세 로딩 중'} else if(QUALITY_ERROR){msg=`품질 상세 로딩 실패: ${html(QUALITY_ERROR)} <button class="btn" onclick="QUALITY_PENDING=true;loadQualityRows()">다시 시도</button>`; hint='품질 상세를 받지 못했습니다'} else {msg='행 단위 품질 데이터 없음 · Apps Script에서 refreshProcessedData() 실행 후 새로고침'; hint='dashboard_cache의 qualityRows가 비어 있습니다'}
+  $('qualityTable').innerHTML=`<tbody><tr><td class="empty">${msg}</td></tr></tbody>`; emptyTable('qualityDetailTable','행 단위 데이터 없음'); $('mapCandidateWrap').style.display='none'; $('qualityDetailHint').textContent=hint; MAP_CANDIDATES={def:null,list:[]}; ISSUE_DETAIL_ROWS=[]}
 function renderQuality(rows,rowLevel){
-  if(!rowLevel){$('qualityTable').innerHTML='<tbody><tr><td class="empty">행 단위 품질 데이터 없음 · Apps Script에서 refreshProcessedData() 실행 후 새로고침</td></tr></tbody>'; emptyTable('qualityDetailTable','행 단위 데이터 없음'); $('mapCandidateWrap').style.display='none'; $('qualityDetailHint').textContent='dashboard_cache의 qualityRows가 비어 있습니다'; MAP_CANDIDATES={def:null,list:[]}; ISSUE_DETAIL_ROWS=[]; return}
+  if(!rowLevel||QUALITY_PENDING){renderQualityState(); return}
   let entries=Object.entries(issueDefs).map(([key,d])=>({key,name:d.name,rows:rows.filter(d.fn)}));
   let flagged=rows.filter(ALL_ISSUES.fn), overlap=entries.reduce((a,e)=>a+e.rows.length,0);
   let body=entries.map(e=>{let rev=sum(e.rows,'revenue'), info=issueDefs[e.key].info, badge=info?'<span class="badge gray">참고</span>':(e.rows.length?'<span class="badge amber">확인</span>':'<span class="badge gray">정상</span>'); return `<tr class="clickable ${e.key===activeIssue?'on':''}" data-issue="${e.key}"><td>${badge} ${e.name}</td><td class="r">${e.rows.length.toLocaleString('ko-KR')}</td><td class="r">${KRW(rev)}</td></tr>`}).join('');
@@ -286,7 +321,7 @@ function renderManagerDaily(rows,entries){entries=entries||[...group(rows,'manag
 function renderManagerDetail(rows){let entries=[...group(rows,r=>r.manager+'|||'+r.channel)].map(([key,rs])=>{let [manager,channel]=key.split('|||'); return {manager,channel,rev:sum(rs,'revenue'),stl:sum(rs,'settlement'),cost:sum(rs,'cost')+sum(rs,'shipCost'),mar:sum(rs,'margin'),orders:orderCount(rs),qty:sum(rs,'qty')}}).sort((a,b)=>a.manager.localeCompare(b.manager)||b.rev-a.rev); if(!entries.length){emptyTable('managerDetailTable');return} $('managerDetailTable').innerHTML='<thead><tr><th>담당자</th><th>채널</th><th class="r">주문</th><th class="r">수량</th><th class="r">매출</th><th class="r">정산</th><th class="r">원가+배송</th><th class="r">마진</th><th class="r">마진율</th></tr></thead><tbody>'+entries.map(e=>{let rate=e.rev?e.mar/e.rev*100:0; return `<tr class="clickable" data-manager="${html(e.manager)}"><td><b style="color:${managerColor(e.manager)}">${html(e.manager)}</b></td><td>${html(e.channel)}</td><td class="r">${e.orders}</td><td class="r">${e.qty}</td><td class="r">${KRW(e.rev)}</td><td class="r">${KRW(e.stl)}</td><td class="r">${KRW(e.cost)}</td><td class="r ${e.mar<0?'neg':''}">${KRW(e.mar)}</td><td class="r ${rate<0?'neg':''}">${rate.toFixed(1)}%</td></tr>`}).join('')+'</tbody>'; document.querySelectorAll('[data-manager]').forEach(el=>el.onclick=()=>setFilter('managerFilter',el.dataset.manager))}
 function bindChannelClicks(){document.querySelectorAll('[data-channel]').forEach(el=>el.onclick=()=>setFilter('channelFilter',el.dataset.channel))}
 function setFilter(id,val){let same=$(id).value===val; $(id).value=same?'ALL':val; refreshFilterOptions(); applyTarget(); renderAll()}
-window.addEventListener('load',loadData);
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',loadData); else loadData();
 </script>
 </body>
 </html>
