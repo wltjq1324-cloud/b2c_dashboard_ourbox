@@ -1,5 +1,5 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.8.1
+// 아워박스 MVP 대시보드 — Apps Script v3.9
 // ============================================================
 // 이 파일 전체를 Apps Script 편집기의 기존 v3.7 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
@@ -71,6 +71,12 @@
 //   - 쓰기 청크 4,000행 → 2,000행. 서식 적용도 청크로.
 //   - 기존 가공_데이터 읽기는 필요할 때만(새 행이 있거나, 자동 채움이 뭔가 바꿨을 때). '변경 없음' 실행은 다시 수 초.
 //   - 자동 채움이 map_product 행마다 쓰기 4회 → 메모리에서 채운 뒤 setValues 1회 + 배경은 색이 같은 연속 구간별 1회.
+//
+// v3.9 변경 (큰 읽기·쓰기를 Sheets 고급 서비스로):
+//   - 편집기 좌측 '서비스 +' → Google Sheets API 추가(식별자 Sheets) 가 되어 있으면
+//     getValuesChunked_ / setValuesChunked_ 가 Sheets.Spreadsheets.Values.get / update 를 씁니다.
+//     12만 행 × 17열 전체 쓰기 183초 → 수십 초 수준. 서비스가 없으면 기존 getRange 방식으로 자동 폴백합니다.
+//   - 첫 실행 때 스프레드시트 접근 권한 확인 창이 한 번 뜹니다.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -764,24 +770,88 @@ function getUnmappedInfo(ss) {
   return unmapped;
 }
 
-// 큰 범위 읽기. 한 번에 2만 행(×17열 = 34만 셀) 이하로 나눠 읽어야 시트 서비스 타임아웃을 피합니다.
+// 큰 범위 읽기·쓰기.
+// 1순위: Sheets 고급 서비스(Sheets.Spreadsheets.Values) — 편집기 '서비스 +'에서 Google Sheets API를 추가해야 존재합니다.
+// 2순위: getRange().getValues()/setValues() 를 2만/2천 행씩 나눠 호출 (시트 서비스 타임아웃 회피).
 var READ_CHUNK_ROWS = 20000;
 var WRITE_CHUNK_ROWS = 2000;
+var API_READ_CHUNK_ROWS = 40000;
+var API_WRITE_CHUNK_ROWS = 20000;
+
+function sheetsApiAvailable_() {
+  try {
+    return typeof Sheets !== 'undefined' && !!(Sheets.Spreadsheets && Sheets.Spreadsheets.Values);
+  } catch (err) {
+    return false;
+  }
+}
+
+function a1Col_(n) {
+  var s = '';
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+function rangeA1_(sheet, startRow, startCol, numRows, numCols) {
+  return "'" + sheet.getName().replace(/'/g, "''") + "'!" +
+    a1Col_(startCol) + startRow + ':' + a1Col_(startCol + numCols - 1) + (startRow + numRows - 1);
+}
 
 function getValuesChunked_(sheet, startRow, startCol, numRows, numCols, chunkRows) {
   if (numRows <= 0) return [];
-  chunkRows = chunkRows || READ_CHUNK_ROWS;
-  var out = [];
-  for (var offset = 0; offset < numRows; offset += chunkRows) {
-    var n = Math.min(chunkRows, numRows - offset);
-    var part = sheet.getRange(startRow + offset, startCol, n, numCols).getValues();
-    for (var i = 0; i < part.length; i++) out.push(part[i]);
+
+  if (sheetsApiAvailable_()) {
+    try {
+      var ssId = sheet.getParent().getId();
+      var out = [];
+      for (var off = 0; off < numRows; off += API_READ_CHUNK_ROWS) {
+        var n = Math.min(API_READ_CHUNK_ROWS, numRows - off);
+        var resp = Sheets.Spreadsheets.Values.get(ssId, rangeA1_(sheet, startRow + off, startCol, n, numCols), {
+          valueRenderOption: 'UNFORMATTED_VALUE',
+          dateTimeRenderOption: 'FORMATTED_STRING'
+        });
+        var vals = (resp && resp.values) || [];
+        // API는 뒤쪽 빈 셀·빈 행을 생략하므로 getValues()와 같은 모양으로 채웁니다.
+        for (var i = 0; i < n; i++) {
+          var row = vals[i] ? vals[i].slice(0, numCols) : [];
+          while (row.length < numCols) row.push('');
+          out.push(row);
+        }
+      }
+      return out;
+    } catch (err) {
+      Logger.log('Sheets API 읽기 실패 → getRange 폴백: ' + err.message);
+    }
   }
-  return out;
+
+  chunkRows = chunkRows || READ_CHUNK_ROWS;
+  var fallback = [];
+  for (var offset = 0; offset < numRows; offset += chunkRows) {
+    var cnt = Math.min(chunkRows, numRows - offset);
+    var part = sheet.getRange(startRow + offset, startCol, cnt, numCols).getValues();
+    for (var k = 0; k < part.length; k++) fallback.push(part[k]);
+  }
+  return fallback;
 }
 
 function setValuesChunked_(sheet, startRow, startCol, values, chunkSize, flushEachChunk) {
   if (!values || values.length === 0) return;
+
+  if (sheetsApiAvailable_()) {
+    try {
+      var ssId = sheet.getParent().getId();
+      for (var off = 0; off < values.length; off += API_WRITE_CHUNK_ROWS) {
+        var part = values.slice(off, off + API_WRITE_CHUNK_ROWS);
+        Sheets.Spreadsheets.Values.update({ values: part }, ssId,
+          rangeA1_(sheet, startRow + off, startCol, part.length, part[0].length),
+          { valueInputOption: 'RAW' });
+      }
+      return;
+    } catch (err) {
+      // 일부 청크가 이미 써졌어도 아래 폴백이 같은 범위를 덮어쓰므로 결과는 같습니다.
+      Logger.log('Sheets API 쓰기 실패 → setValues 폴백: ' + err.message);
+    }
+  }
 
   chunkSize = chunkSize || WRITE_CHUNK_ROWS;
   for (var offset = 0; offset < values.length; offset += chunkSize) {
@@ -830,7 +900,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.8.1'
+      version: 'v3.9'
     }
   };
 }
@@ -853,7 +923,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.8.1'
+      version: 'v3.9'
     }
   };
 }
@@ -1214,7 +1284,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.8.1',
+    version: 'v3.9',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
