@@ -72,7 +72,8 @@ jobs:
           node-version: '20'
 
       - name: Install clasp
-        run: npm i -g @google/clasp@2.4.2
+        # 사용자 PC의 clasp login 결과(~/.clasprc.json, tokens.default 형식)와 같은 메이저 버전이어야 읽힙니다.
+        run: npm i -g @google/clasp@3
 
       - name: Restore clasp credentials
         env:
@@ -110,9 +111,10 @@ jobs:
           if [ -n "$DEPLOYMENT_ID" ]; then
             echo "id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"; echo "시크릿 DEPLOYMENT_ID 사용"; exit 0
           fi
-          clasp deployments | tee deployments.txt
-          # '- AKfycb... @12 - 설명' 형식. @HEAD(편집기 테스트 배포)는 제외
-          IDS=$(grep -E '^- ' deployments.txt | grep -v '@HEAD' | awk '{print $2}' || true)
+          clasp --json deployments > deployments.json
+          cat deployments.json
+          # versionNumber가 없는 항목은 @HEAD(편집기 테스트 배포)라 제외
+          IDS=$(python3 -c "import json;print('\n'.join(d['deploymentId'] for d in json.load(open('deployments.json')) if d.get('versionNumber')))")
           COUNT=$(echo "$IDS" | grep -c . || true)
           if [ "$COUNT" -eq 1 ]; then
             echo "id=$IDS" >> "$GITHUB_OUTPUT"; echo "웹앱 배포 1개 자동 선택: $IDS"
