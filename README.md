@@ -22,7 +22,7 @@
 1. **Apps Script API 켜기**: https://script.google.com/home/usersettings → "Google Apps Script API" 사용 설정.
 2. **clasp 로그인 토큰 → GitHub 시크릿**: 내 PC 터미널에서
    ```bash
-   npm i -g @google/clasp
+   npm i -g @google/clasp@3
    clasp login          # 브라우저가 열리면 시트 소유 계정으로 로그인
    type %USERPROFILE%\.clasprc.json     # Mac: cat ~/.clasprc.json
    ```
