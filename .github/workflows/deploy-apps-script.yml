@@ -3,9 +3,10 @@
 # 기존 웹앱 배포(DEPLOYMENT_ID)에 새 버전을 만듭니다. /exec URL은 그대로 유지됩니다.
 #
 # 1회 설정(README '자동 배포' 절 참조):
-#   - 시크릿 CLASPRC_JSON : 로컬 `clasp login` 뒤 생기는 ~/.clasprc.json 내용 전체
-#   - 시크릿 DEPLOYMENT_ID: Apps Script 배포 관리에 보이는 웹앱 배포 ID (AKfycb... 로 시작)
-#   - .clasp.json 의 scriptId: Apps Script 프로젝트 설정 → 스크립트 ID
+#   - 시크릿 CLASPRC_JSON : 로컬 `clasp login` 뒤 생기는 ~/.clasprc.json 내용 전체 (필수)
+#   - .clasp.json 의 scriptId: Apps Script 프로젝트 설정 → 스크립트 ID (필수)
+#   - 시크릿 DEPLOYMENT_ID : 웹앱 배포가 2개 이상일 때만. 1개면 자동으로 찾습니다.
+#   - appsscript.json 은 라이브 프로젝트에서 clasp pull 로 받아 쓰므로 대조할 필요 없습니다.
 name: Deploy Apps Script
 
 on:
@@ -46,7 +47,6 @@ jobs:
           set -euo pipefail
           MISSING=""
           [ -z "$CLASPRC_JSON" ] && MISSING="$MISSING CLASPRC_JSON"
-          [ -z "$DEPLOYMENT_ID" ] && MISSING="$MISSING DEPLOYMENT_ID"
           SCRIPT_ID=$(python3 -c "import json;print(json.load(open('.clasp.json')).get('scriptId',''))")
           [ -z "$SCRIPT_ID" ] && MISSING="$MISSING .clasp.json:scriptId"
           if [ -n "$MISSING" ]; then
@@ -58,8 +58,6 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf build && mkdir build
-          cp "${{ steps.pick.outputs.file }}" build/Code.js
-          cp appsscript.json build/appsscript.json
           # clasp는 .clasp.json이 가리키는 rootDir(build)만 올립니다.
           python3 - <<'PY'
           import json
@@ -85,16 +83,49 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           python3 -c "import json;json.load(open('$HOME/.clasprc.json'))" || { echo "::error::CLASPRC_JSON 이 올바른 JSON이 아닙니다"; exit 1; }
 
+      - name: Pull live manifest (appsscript.json)
+        run: |
+          set -euo pipefail
+          # 라이브 프로젝트의 파일을 그대로 받아 매니페스트는 유지하고 Code.js만 우리 것으로 바꿉니다.
+          clasp pull
+          ls -la build
+          if [ ! -f build/appsscript.json ]; then
+            echo "::warning::라이브 매니페스트를 받지 못해 저장소의 appsscript.json 을 사용합니다"
+            cp appsscript.json build/appsscript.json
+          fi
+          # 편집기 파일명이 Code.gs 든 코드.gs 든 .js 로 내려오므로, .js 전부 지우고 우리 파일 하나만 둡니다
+          find build -maxdepth 1 -name '*.js' -delete
+          cp "${{ steps.pick.outputs.file }}" build/Code.js
+          ls -la build
+
       - name: clasp push
         run: clasp push -f
 
-      - name: clasp deploy (new version on existing deployment)
+      - name: Resolve deployment id
+        id: dep
         env:
           DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
         run: |
           set -euo pipefail
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            echo "id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"; echo "시크릿 DEPLOYMENT_ID 사용"; exit 0
+          fi
+          clasp deployments | tee deployments.txt
+          # '- AKfycb... @12 - 설명' 형식. @HEAD(편집기 테스트 배포)는 제외
+          IDS=$(grep -E '^- ' deployments.txt | grep -v '@HEAD' | awk '{print $2}' || true)
+          COUNT=$(echo "$IDS" | grep -c . || true)
+          if [ "$COUNT" -eq 1 ]; then
+            echo "id=$IDS" >> "$GITHUB_OUTPUT"; echo "웹앱 배포 1개 자동 선택: $IDS"
+          else
+            echo "::error::웹앱 배포가 ${COUNT}개라 자동 선택할 수 없습니다. 위 목록에서 /exec URL에 쓰이는 배포 ID를 시크릿 DEPLOYMENT_ID 로 등록하세요."
+            exit 1
+          fi
+
+      - name: clasp deploy (new version on existing deployment)
+        run: |
+          set -euo pipefail
           DESC="main ${GITHUB_SHA::7} · ${{ steps.pick.outputs.file }}"
-          clasp deploy -i "$DEPLOYMENT_ID" -d "$DESC" | tee deploy.log
+          clasp deploy -i "${{ steps.dep.outputs.id }}" -d "$DESC" | tee deploy.log
           {
             echo "### Apps Script 배포 완료"
             echo "- 파일: \`${{ steps.pick.outputs.file }}\`"

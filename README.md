@@ -17,23 +17,24 @@
 `main`에 `apps-script-v*.js`가 머지되면 `.github/workflows/deploy-apps-script.yml`이 **가장 높은 버전 파일**을 Apps Script 프로젝트에
 `clasp push` 하고, 기존 웹앱 배포에 **새 버전**을 만듭니다. `/exec` URL은 그대로입니다. 메모장 복붙은 더 이상 없습니다.
 
-### 1회 설정 (Google 계정 소유자만 가능, 약 10분)
+### 1회 설정 (Google 계정 소유자만 가능, 약 5분)
 
 1. **Apps Script API 켜기**: https://script.google.com/home/usersettings → "Google Apps Script API" 사용 설정.
-2. **스크립트 ID**: Apps Script 편집기 → ⚙️ 프로젝트 설정 → "스크립트 ID" 복사 → 이 저장소 `.clasp.json`의 `scriptId`에 붙여넣고 커밋.
-3. **매니페스트 확인**: 같은 화면에서 "appsscript.json 매니페스트 파일을 편집기에 표시" 체크 → 편집기에 뜬 `appsscript.json` 내용과
-   이 저장소의 `appsscript.json`을 비교해 다르면 저장소 쪽을 편집기 내용으로 맞춥니다(`clasp push`가 매니페스트도 덮어쓰기 때문).
-4. **clasp 로그인 토큰**: 내 PC 터미널에서
+2. **clasp 로그인 토큰 → GitHub 시크릿**: 내 PC 터미널에서
    ```bash
    npm i -g @google/clasp
    clasp login          # 브라우저가 열리면 시트 소유 계정으로 로그인
-   cat ~/.clasprc.json  # (Windows: type %USERPROFILE%\.clasprc.json)
+   type %USERPROFILE%\.clasprc.json     # Mac: cat ~/.clasprc.json
    ```
    출력된 JSON 전체를 GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret → 이름 `CLASPRC_JSON`.
-5. **배포 ID**: Apps Script 편집기 → 배포 → 배포 관리 → 현재 웹앱 배포의 "배포 ID"(`AKfycb…`) 복사 → 시크릿 `DEPLOYMENT_ID`.
+3. **스크립트 ID**: Apps Script 편집기 → ⚙️ 프로젝트 설정 → "스크립트 ID" → 이 저장소 `.clasp.json`의 `scriptId`에 넣고 커밋.
+   (이 값은 비밀이 아닙니다. 채팅으로 전달해 커밋을 맡겨도 됩니다.)
+
+그 밖의 것은 워크플로가 알아서 합니다: 매니페스트(`appsscript.json`)는 라이브 프로젝트에서 `clasp pull`로 받아 그대로 쓰고,
+웹앱 배포 ID는 `clasp deployments`로 찾습니다. 웹앱 배포가 2개 이상일 때만 시크릿 `DEPLOYMENT_ID`가 필요합니다.
 
 설정 뒤 첫 확인: Actions 탭에서 "Deploy Apps Script" 워크플로를 `Run workflow`로 수동 실행 → 녹색이면 Apps Script 배포 관리에 새 버전이 생기고,
-대시보드 사이드바(F12 콘솔 `[ourbox] summary` 로그의 `meta.version`)가 새 버전으로 바뀝니다.
+대시보드 F12 콘솔 `[ourbox] summary` 로그의 `meta.version`이 새 버전으로 바뀝니다.
 
 ### 주의
 
@@ -41,7 +42,7 @@
 - 토큰은 로그인한 계정 권한 전부를 갖습니다. 공개 저장소라도 Actions 시크릿은 암호화되고 포크에서 올린 PR에는 전달되지 않습니다.
   다만 저장소에 쓰기 권한이 있는 사람은 워크플로를 고쳐 시크릿을 꺼낼 수 있으니, 협업자를 추가할 때 이 점을 기억하세요.
 - 시크릿이나 `scriptId`가 비어 있으면 워크플로는 배포를 건너뛰고 빨간색으로 사유를 남깁니다. 그동안은 예전처럼 수동 복붙으로 배포하면 됩니다.
-- 워크플로 파일이 올리는 것은 `Code.js`(= 최신 `apps-script-v*.js`)와 `appsscript.json` 두 개뿐입니다. 편집기에 다른 파일이 있으면 `clasp push -f`가 지웁니다. 현재 프로젝트는 `Code.gs` 하나입니다.
+- 워크플로는 라이브 프로젝트를 `clasp pull`한 뒤 `.js` 파일을 전부 지우고 `Code.js`(= 최신 `apps-script-v*.js`) 하나만 올립니다. 편집기에 코드 파일이 여러 개면 합쳐지지 않고 지워지니, 현재처럼 `Code.gs` 하나를 유지하세요.
 
 `index.html`은 대시보드 본문을 gzip + base64로 압축해 런타임에 풀어 쓰는 구조입니다.
 그래서 `index.html`은 직접 수정하지 않습니다. 수정은 항상 아래 순서로 합니다.
