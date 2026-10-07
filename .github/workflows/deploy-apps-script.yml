@@ -1,0 +1,107 @@
+# Apps Script 자동 배포
+# main에 apps-script-v*.js 변경이 올라오면 가장 높은 버전 파일을 Code.js로 clasp push 하고
+# 기존 웹앱 배포(DEPLOYMENT_ID)에 새 버전을 만듭니다. /exec URL은 그대로 유지됩니다.
+#
+# 1회 설정(README '자동 배포' 절 참조):
+#   - 시크릿 CLASPRC_JSON : 로컬 `clasp login` 뒤 생기는 ~/.clasprc.json 내용 전체
+#   - 시크릿 DEPLOYMENT_ID: Apps Script 배포 관리에 보이는 웹앱 배포 ID (AKfycb... 로 시작)
+#   - .clasp.json 의 scriptId: Apps Script 프로젝트 설정 → 스크립트 ID
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps-script-v*.js'
+      - 'appsscript.json'
+      - '.clasp.json'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick newest apps-script-v*.js
+        id: pick
+        run: |
+          set -euo pipefail
+          FILE=$(ls apps-script-v*.js | sort -V | tail -1)
+          if [ -z "$FILE" ]; then echo "apps-script-v*.js 파일이 없습니다"; exit 1; fi
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "선택: $FILE"
+
+      - name: Check secrets
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -z "$CLASPRC_JSON" ] && MISSING="$MISSING CLASPRC_JSON"
+          [ -z "$DEPLOYMENT_ID" ] && MISSING="$MISSING DEPLOYMENT_ID"
+          SCRIPT_ID=$(python3 -c "import json;print(json.load(open('.clasp.json')).get('scriptId',''))")
+          [ -z "$SCRIPT_ID" ] && MISSING="$MISSING .clasp.json:scriptId"
+          if [ -n "$MISSING" ]; then
+            echo "::error::설정이 비어 있어 배포를 건너뜁니다:$MISSING — README '자동 배포' 절을 따라 1회 설정하세요."
+            exit 1
+          fi
+
+      - name: Stage build dir
+        run: |
+          set -euo pipefail
+          rm -rf build && mkdir build
+          cp "${{ steps.pick.outputs.file }}" build/Code.js
+          cp appsscript.json build/appsscript.json
+          # clasp는 .clasp.json이 가리키는 rootDir(build)만 올립니다.
+          python3 - <<'PY'
+          import json
+          c = json.load(open('.clasp.json'))
+          c['rootDir'] = 'build'
+          json.dump(c, open('.clasp.json', 'w'), indent=2, ensure_ascii=False)
+          PY
+          ls -la build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm i -g @google/clasp@2.4.2
+
+      - name: Restore clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          python3 -c "import json;json.load(open('$HOME/.clasprc.json'))" || { echo "::error::CLASPRC_JSON 이 올바른 JSON이 아닙니다"; exit 1; }
+
+      - name: clasp push
+        run: clasp push -f
+
+      - name: clasp deploy (new version on existing deployment)
+        env:
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          set -euo pipefail
+          DESC="main ${GITHUB_SHA::7} · ${{ steps.pick.outputs.file }}"
+          clasp deploy -i "$DEPLOYMENT_ID" -d "$DESC" | tee deploy.log
+          {
+            echo "### Apps Script 배포 완료"
+            echo "- 파일: \`${{ steps.pick.outputs.file }}\`"
+            echo "- 설명: $DESC"
+            echo '```'; cat deploy.log; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f ~/.clasprc.json

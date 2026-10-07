@@ -1,0 +1,7 @@
+# clasp 계정 토큰 — 절대 커밋 금지 (GitHub 시크릿 CLASPRC_JSON 으로만)
+.clasprc.json
+# 워크플로가 만드는 임시 빌드 폴더
+build/
+# 로컬 잡동사니
+node_modules/
+.DS_Store
