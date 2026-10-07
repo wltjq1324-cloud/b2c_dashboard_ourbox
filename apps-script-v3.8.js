@@ -1,7 +1,7 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.7
+// 아워박스 MVP 대시보드 — Apps Script v3.8
 // ============================================================
-// 이 파일 전체를 Apps Script 편집기의 기존 v3.6 코드 위에 덮어쓰면 됩니다.
+// 이 파일 전체를 Apps Script 편집기의 기존 v3.7 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
 //
 // v3.3 유지:
@@ -54,6 +54,17 @@
 //     refreshDashboardCache()가 시트를 쓸 때 같이 갱신하므로 사람이 신경 쓸 것은 없습니다.
 //   - 시트를 읽어야 할 때도 요청한 섹션의 행만 읽습니다(part=summary면 qualityRows 청크를 읽지 않음).
 //   - meta에 servedFrom / servedMs 가 실려 옵니다. 대시보드 사이드바에서 어디가 느린지 바로 보입니다.
+//
+// v3.8 변경 (매핑 시트 자동 채움):
+//   - 🔄 갱신 때 새 품목명·새 쇼핑몰명을 기존 매핑에서 **추론해 값까지 채웁니다.**
+//     품목: 접두어([L]·[만월상회]) 제거 후 일치 / (NEA) 배수 → '표준명 * N' / A (1EA) + B (1EA) 세트 → 구성단품 나열
+//     채널: 기존 쇼핑몰명을 포함하면 그 행의 채널그룹·수수료·담당자 복사
+//   - 빈 칸만 채웁니다. 사람이 쓴 값은 건드리지 않습니다.
+//   - 색: 초록 = 규칙으로 확정, 파랑 = 추론(검토), 노랑 = 못 채움. map_product G열 / map_channel F열 '매핑출처'.
+//   - 세트·배수 원가는 기존 로직이 계산하므로 map_cost에는 **완전히 새 단품**만 빈 행으로 추가합니다.
+//   - '점검_리포트' 탭: 검토 필요(파랑)·사람이 채울 것(노랑)을 최근 30일 매출 영향 순으로 정렬.
+//   - 채운 키가 과거 가공_데이터에 미매핑으로 남아 있으면 이번 실행을 전체 재생성으로 전환합니다.
+//   - 메뉴 '🧭 매핑 백로그 자동 채움': 쌓인 미매핑 전부에 같은 추론을 돌리고 전체 재생성.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -78,6 +89,7 @@ function onOpen() {
     .createMenu('📊 아워박스')
     .addItem('🔄 가공_데이터 갱신 (증분)', 'refreshProcessedData')
     .addItem('🧹 가공_데이터 전체 재생성', 'refreshProcessedDataFull')
+    .addItem('🧭 매핑 백로그 자동 채움', 'fillMappingBacklogMenu')
     .addItem('⚡ 대시보드 캐시만 갱신', 'refreshDashboardCacheMenu')
     .addItem('📋 테스트: 데이터 확인', 'testGetData')
     .addToUi();
@@ -128,6 +140,14 @@ function refreshProcessedData() {
 
 function refreshProcessedDataFull() {
   runWithLock_('가공_데이터 전체 재생성', function() {
+    return refreshProcessedDataCore_(true);
+  });
+}
+
+// 쌓인 미매핑(표준품목명 빈 행, 미매핑 쇼핑몰) 전부에 추론을 돌리고 전체 재생성합니다.
+// 전체 재생성 경로는 raw_orders 전체를 읽으므로 모든 쇼핑몰명이 추론 대상에 들어갑니다.
+function fillMappingBacklogMenu() {
+  runWithLock_('매핑 백로그 자동 채움', function() {
     return refreshProcessedDataCore_(true);
   });
 }
@@ -196,21 +216,52 @@ function refreshProcessedDataCore_(forceFull) {
   updateMappingStatus(ss, costMap);
   timer.mark('map_product 정리');
 
-  // 5. 증분이면 기존 가공_데이터를 읽어 둡니다 (출고배송비 첫 행 판정 + 캐시 재생성용).
+  // 5. 증분이면 기존 가공_데이터를 읽어 둡니다 (출고배송비 첫 행 판정 + 캐시 재생성 + 백로그 판정용).
   //    읽기는 쓰기보다 훨씬 싸서 이 비용은 감수합니다.
-  //    새 행이 0건이고 캐시도 멀쩡하면 아무것도 안 읽고 끝냅니다.
   var cacheSheet = ss.getSheetByName('dashboard_cache');
   var cacheMissing = !cacheSheet || cacheSheet.getLastRow() < 2;
   var seenOrders = {};
   var existingRows = [];
   var nothingToDo = incremental && rawData.length === 0 && !cacheMissing;
-  if (incremental && procCount > 0 && !nothingToDo) {
+  if (incremental && procCount > 0) {
     existingRows = procSheet.getRange(2, 1, procCount, PROC_HEADERS.length).getValues();
     for (var e = 0; e < existingRows.length; e++) {
       var oid = text_(existingRows[e][0]);
       if (oid) seenOrders[oid] = true;
     }
     timer.mark('가공_데이터 읽기');
+  }
+
+  // 5b. 매핑 자동 채움 — 새 쇼핑몰명(raw 신규 행 + 과거 미매핑 행) / 표준품목명이 빈 map_product 행
+  var fill = null;
+  var fillError = '';
+  try {
+    var unknownShops = collectUnknownShops_(rawData, existingRows, chMap);
+    fill = fillMappings_(ss, unknownShops, chMap, prMap, costMap);
+    timer.mark('매핑 자동 채움');
+  } catch (err) {
+    fillError = err.message;
+    Logger.log('fillMappings_ 실패: ' + err.message);
+  }
+
+  if (fill && fill.changed) {
+    chMap = loadChannelMap(ss);
+    prMap = loadProductMap(ss);
+    costMap = loadCostMap(ss);
+    updateMappingStatus(ss, costMap);
+    mapSig = mapSignature_(chMap, prMap, costMap, shipCost);
+    mapSummary = mapSummary_(chMap, prMap, costMap, shipCost);
+
+    // 채운 키가 과거 가공_데이터에 미매핑으로 남아 있으면 과거 행도 다시 계산해야 합니다 → 전체 재생성
+    if (incremental && hasBacklogRows_(existingRows, fill)) {
+      incremental = false;
+      decision = { mode: 'full', reason: 'auto_fill_backlog' };
+      rawData = rawSheet.getRange(2, 1, rawCount, 7).getValues();
+      existingRows = [];
+      seenOrders = {};
+      nothingToDo = false;
+      timer.mark('raw 전체 재읽기');
+    }
   }
 
   // 6. 매핑 → 가공 행 생성
@@ -249,6 +300,20 @@ function refreshProcessedDataCore_(forceFull) {
     updatedAt: new Date().toISOString()
   });
 
+  // 9b. 점검 리포트 (검토 필요 / 사람이 채울 것)
+  try {
+    writeCheckReport_(ss, {
+      mode: incremental ? '증분' : '전체 재생성',
+      fill: fill,
+      fillError: fillError,
+      rows: nothingToDo ? existingRows : allRows,
+      costMap: costMap
+    });
+    timer.mark('점검 리포트');
+  } catch (err) {
+    Logger.log('writeCheckReport_ 실패: ' + err.message);
+  }
+
   // 10. 결과 메시지
   var msg = '✅ 가공_데이터 갱신 완료!\n\n' +
     '모드: ' + (incremental
@@ -268,15 +333,22 @@ function refreshProcessedDataCore_(forceFull) {
   }
 
   msg += '소요 시간: ' + timer.text();
+  msg += '\n' + fillSummaryText_(fill, fillError);
 
-  if (newItems.length > 0) {
-    var previewItems = newItems.slice(0, 20);
-    msg += '\n\n⚠️ 새로 추가된 품목 ' + newItems.length + '개:\n' + previewItems.join('\n');
-    if (newItems.length > previewItems.length) {
-      msg += '\n...외 ' + (newItems.length - previewItems.length) + '개';
+  var openItems = fill ? fill.productsOpen : newItems;
+  if (openItems.length > 0) {
+    var previewItems = openItems.slice(0, 15);
+    msg += '\n\n⚠️ 추론하지 못한 품목 ' + openItems.length + '개 (map_product 노란 행):\n' + previewItems.join('\n');
+    if (openItems.length > previewItems.length) {
+      msg += '\n...외 ' + (openItems.length - previewItems.length) + '개';
     }
-    msg += '\n\n→ map_product에서 표준품목명/상품군을 입력해주세요.' +
-      '\n   입력 후 갱신하면 자동으로 전체 재생성됩니다.';
+    msg += '\n→ 표준품목명/상품군을 입력하면 다음 갱신에서 자동으로 전체 재생성됩니다.';
+  }
+  if (fill && fill.channelsOpen.length > 0) {
+    msg += '\n\n⚠️ 추론하지 못한 쇼핑몰 ' + fill.channelsOpen.length + '개 (map_channel 노란 행):\n' + fill.channelsOpen.slice(0, 10).join('\n');
+  }
+  if (fill && fill.costsAdded.length > 0) {
+    msg += '\n\n💰 원가 입력 필요한 새 단품 ' + fill.costsAdded.length + '개 (map_cost 노란 행):\n' + fill.costsAdded.slice(0, 10).join('\n');
   }
 
   if (processedTotal > ROW_WARN_THRESHOLD) {
@@ -333,7 +405,8 @@ function decisionReasonText_(reason) {
     map_changed: '매핑 시트 변경 감지',
     raw_shrunk: 'raw_orders 행 수 감소',
     processed_mismatch: '가공_데이터 행 수 불일치',
-    raw_mismatch: 'raw_orders 순서/내용 변경 감지'
+    raw_mismatch: 'raw_orders 순서/내용 변경 감지',
+    auto_fill_backlog: '매핑 자동 채움 → 과거 미매핑 행 재계산'
   };
   return text[reason] || reason;
 }
@@ -494,6 +567,11 @@ function num_(value) {
   if (value instanceof Date) return 0;
   var text = String(value == null ? '' : value).replace(/[,\s₩원]/g, '');
   if (!text || text === '-') return 0;
+  // "15%" 같은 텍스트 비율 → 0.15 (셀이 텍스트로 들어온 경우 대비)
+  if (/%$/.test(text)) {
+    var pct = Number(text.slice(0, -1));
+    return isFinite(pct) ? pct / 100 : 0;
+  }
   var parsed = Number(text);
   return isFinite(parsed) ? parsed : 0;
 }
@@ -706,7 +784,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.7'
+      version: 'v3.8'
     }
   };
 }
@@ -729,7 +807,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.7'
+      version: 'v3.8'
     }
   };
 }
@@ -1090,7 +1168,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.7',
+    version: 'v3.8',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -1261,6 +1339,434 @@ function normalizeDateOnly_(value) {
 function p2_(value) {
   var text = String(value);
   return text.length < 2 ? '0' + text : text;
+}
+
+// ============================================================
+// v3.8 매핑 자동 채움
+// ============================================================
+var FILL_COLOR_AUTO = '#DCFCE7';   // 규칙으로 확정
+var FILL_COLOR_INFER = '#DBEAFE';  // 추론 — 검토 필요
+var FILL_COLOR_OPEN = '#FEF3C7';   // 못 채움 — 사람이 입력
+var FILL_COLOR_WARN = '#FEE2E2';   // 원가 0/1 등 위험
+var REPORT_SHEET_NAME = '점검_리포트';
+var REPORT_RECENT_DAYS = 30;
+
+// 품목명 정규화: 선행 [접두어] 제거, (N개입) → N개입, 끝의 (1EA) 제거, 공백 제거, 소문자
+function normItem_(s) {
+  s = String(s || '').toLowerCase();
+  var prev;
+  do { prev = s; s = s.replace(/^\s*\[[^\]]*\]\s*/, ''); } while (s !== prev);
+  s = s.replace(/\(\s*(\d+)\s*개입\s*\)/g, ' $1개입');
+  s = s.replace(/\(\s*1\s*ea\s*\)\s*$/i, '');
+  s = s.replace(/\s+/g, '');
+  return s;
+}
+
+// 표준품목명이 있는 map_product 행 + 표준품목명 자체를 정규화 키로 인덱싱합니다.
+function buildProductIndex_(prMap) {
+  var index = {};
+  var name;
+  for (name in prMap) {
+    var p = prMap[name];
+    if (!p.std) continue;
+    var key = normItem_(name);
+    if (key && !index[key]) index[key] = { std: p.std, cat: p.cat, parts: p.parts };
+  }
+  for (name in prMap) {
+    var q = prMap[name];
+    if (!q.std) continue;
+    var stdKey = normItem_(q.std);
+    if (stdKey && !index[stdKey]) index[stdKey] = { std: q.std, cat: q.cat, parts: q.parts };
+  }
+  return index;
+}
+
+function repeatParts_(base, n) {
+  var unit = base.parts ? base.parts.split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [base.std];
+  var out = [];
+  for (var i = 0; i < n; i++) out = out.concat(unit);
+  return out;
+}
+
+// 단일 품목(세트 아님) 추론: 일치 → 배수 → 포함
+function inferSingleProduct_(name, index, allowFuzzy) {
+  var n = normItem_(name);
+  if (!n) return null;
+  if (index[n]) {
+    var hit = index[n];
+    return { std: hit.std, cat: hit.cat, parts: hit.parts, source: '자동·일치' };
+  }
+
+  // 배수: (NEA) 한 번, '+' 없음
+  var m = name.match(/^(.*?)\(\s*(\d+)\s*EA\s*\)(.*)$/i);
+  if (m && name.indexOf('+') < 0) {
+    var count = parseInt(m[2], 10) || 1;
+    var body = (m[1] + ' ' + m[3]).trim();
+    var base = inferSingleProduct_(body, index, false);
+    if (base && base.std) {
+      if (count === 1) return { std: base.std, cat: base.cat, parts: base.parts, source: '자동·일치' };
+      return {
+        std: base.std + ' * ' + count,
+        cat: base.cat,
+        parts: repeatParts_(base, count).join(','),
+        source: '자동·배수'
+      };
+    }
+  }
+
+  // 포함: 정규화 문자열이 기존 키를 포함하고 남는 글자가 6자 이하
+  if (allowFuzzy) {
+    var best = '';
+    for (var key in index) {
+      if (key.length >= 4 && n.indexOf(key) >= 0 && n.length - key.length <= 6 && key.length > best.length) best = key;
+    }
+    if (best) {
+      var f = index[best];
+      return { std: f.std, cat: f.cat, parts: f.parts, source: '추론·유사' };
+    }
+  }
+  return null;
+}
+
+// 품목 추론 진입점. 세트(+)는 조각마다 풀어 구성단품을 나열합니다.
+function inferProduct_(name, index) {
+  name = String(name || '').trim();
+  if (!name) return null;
+
+  if (name.indexOf('+') >= 0) {
+    var segments = name.split('+');
+    var parts = [];
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i].trim();
+      var count = 1;
+      var em = seg.match(/^(.*?)\(\s*(\d+)\s*EA\s*\)\s*$/i);
+      if (em) { seg = em[1].trim(); count = parseInt(em[2], 10) || 1; }
+      var base = inferSingleProduct_(seg, index, true);
+      if (!base || !base.std) return null;
+      parts = parts.concat(repeatParts_(base, count));
+    }
+    return { std: name, cat: '세트', parts: parts.join(','), source: '자동·세트' };
+  }
+
+  return inferSingleProduct_(name, index, true);
+}
+
+// 채널 추론: 기존 쇼핑몰명을 포함하면 그 행 복사 → 채널그룹명을 포함하면 그 그룹의 최빈 수수료·담당자
+function inferChannel_(shop, chMap) {
+  shop = String(shop || '').trim();
+  if (!shop) return null;
+
+  var bestName = '';
+  for (var name in chMap) {
+    if (name !== shop && name.length >= 2 && shop.indexOf(name) >= 0 && name.length > bestName.length) bestName = name;
+  }
+  if (bestName) {
+    var c = chMap[bestName];
+    return { group: c.group, fee: c.fee, manager: c.manager, source: '추론·포함', basis: bestName };
+  }
+
+  var groups = {};
+  for (var n2 in chMap) {
+    var g = chMap[n2].group;
+    if (!g || g === '미매핑') continue;
+    if (!groups[g]) groups[g] = { fees: {}, managers: {} };
+    groups[g].fees[chMap[n2].fee] = (groups[g].fees[chMap[n2].fee] || 0) + 1;
+    groups[g].managers[chMap[n2].manager] = (groups[g].managers[chMap[n2].manager] || 0) + 1;
+  }
+  var bestGroup = '';
+  for (var gName in groups) {
+    if (gName.length >= 2 && shop.indexOf(gName) >= 0 && gName.length > bestGroup.length) bestGroup = gName;
+  }
+  if (bestGroup) {
+    return {
+      group: bestGroup,
+      fee: num_(mostCommonKey_(groups[bestGroup].fees)),
+      manager: mostCommonKey_(groups[bestGroup].managers) || '미지정',
+      source: '추론·그룹',
+      basis: bestGroup
+    };
+  }
+  return null;
+}
+
+function mostCommonKey_(counts) {
+  var best = '', bestN = -1;
+  for (var k in counts) { if (counts[k] > bestN) { bestN = counts[k]; best = k; } }
+  return best;
+}
+
+// raw 신규 행 + 과거 가공 행(채널그룹 미매핑)에서 map_channel에 없는 쇼핑몰명을 모읍니다.
+function collectUnknownShops_(rawData, existingRows, chMap) {
+  var seen = {};
+  var out = [];
+  var push = function(shop) {
+    shop = text_(shop);
+    if (!shop || chMap[shop] || seen[shop]) return;
+    seen[shop] = true;
+    out.push(shop);
+  };
+  for (var i = 0; i < rawData.length; i++) push(rawData[i][5]);
+  for (var j = 0; j < existingRows.length; j++) {
+    if (text_(existingRows[j][8], '미매핑') === '미매핑') push(existingRows[j][5]);
+  }
+  return out;
+}
+
+// 채운 키가 과거 가공 행에 미매핑으로 남아 있는지
+function hasBacklogRows_(existingRows, fill) {
+  if (!existingRows.length) return false;
+  for (var i = 0; i < existingRows.length; i++) {
+    var row = existingRows[i];
+    if (fill.filledShops[text_(row[5])] && text_(row[8], '미매핑') === '미매핑') return true;
+    if (fill.filledItems[text_(row[1])] && text_(row[9], '미매핑') === '미매핑') return true;
+  }
+  return false;
+}
+
+function ensureHeader_(sheet, col, title) {
+  if (sheet.getMaxColumns() < col) sheet.insertColumnsAfter(sheet.getMaxColumns(), col - sheet.getMaxColumns());
+  var cell = sheet.getRange(1, col);
+  if (String(cell.getValue() || '').trim() === title) return;
+  cell.setValue(title).setFontWeight('bold').setBackground('#1F2937').setFontColor('#FFFFFF');
+}
+
+// 빈 칸만 채웁니다. 반환값은 리포트·메시지용 요약입니다.
+function fillMappings_(ss, unknownShops, chMap, prMap, costMap) {
+  var result = {
+    changed: false,
+    products: [], productsOpen: [], productDupes: [],
+    channels: [], channelsOpen: [],
+    costsAdded: [],
+    filledItems: {}, filledShops: {},
+    counts: { match: 0, multiple: 0, set: 0, fuzzy: 0 }
+  };
+  var index = buildProductIndex_(prMap);
+  var costNeeded = {};
+
+  // ---- map_product: 표준품목명이 빈 행 ----
+  var prSheet = ss.getSheetByName('map_product');
+  if (prSheet && prSheet.getLastRow() > 1) {
+    ensureHeader_(prSheet, 7, '매핑출처');
+    var prLast = prSheet.getLastRow();
+    var prData = prSheet.getRange(2, 1, prLast - 1, 7).getValues();
+    var nameCount = {};
+    var i;
+    for (i = 0; i < prData.length; i++) {
+      var nm = text_(prData[i][0]);
+      if (nm && nm !== '-') nameCount[nm] = (nameCount[nm] || 0) + 1;
+    }
+    for (i = 0; i < prData.length; i++) {
+      var origName = text_(prData[i][0]);
+      if (!origName || origName === '-') continue;
+      var rowNo = i + 2;
+      if (nameCount[origName] > 1 && result.productDupes.indexOf(origName) < 0) result.productDupes.push(origName);
+      if (text_(prData[i][1])) continue; // 사람이 채운 행은 건드리지 않음
+
+      var guess = inferProduct_(origName, index);
+      if (guess) {
+        prSheet.getRange(rowNo, 2, 1, 2).setValues([[guess.std, guess.cat || '']]);
+        prSheet.getRange(rowNo, 5).setValue(guess.parts || '');
+        prSheet.getRange(rowNo, 7).setValue(guess.source);
+        prSheet.getRange(rowNo, 1, 1, 7).setBackground(guess.source.indexOf('추론') === 0 ? FILL_COLOR_INFER : FILL_COLOR_AUTO);
+        result.products.push({ name: origName, std: guess.std, cat: guess.cat, parts: guess.parts, source: guess.source });
+        result.filledItems[origName] = true;
+        var newKey = normItem_(origName);
+        if (newKey && !index[newKey]) index[newKey] = { std: guess.std, cat: guess.cat, parts: guess.parts };
+        result.changed = true;
+        if (guess.source === '자동·일치') result.counts.match++;
+        else if (guess.source === '자동·배수') result.counts.multiple++;
+        else if (guess.source === '자동·세트') result.counts.set++;
+        else result.counts.fuzzy++;
+        // 원가가 필요한 단품 이름 수집
+        var baseNames = guess.parts ? guess.parts.split(',') : [guess.std.split(' * ')[0]];
+        for (var b = 0; b < baseNames.length; b++) {
+          var bn = baseNames[b].trim();
+          if (bn && !costMap[bn]) costNeeded[bn] = true;
+        }
+      } else {
+        prSheet.getRange(rowNo, 7).setValue('미해결');
+        prSheet.getRange(rowNo, 1, 1, 7).setBackground(FILL_COLOR_OPEN);
+        result.productsOpen.push(origName);
+      }
+    }
+  }
+
+  // ---- map_channel: 없는 쇼핑몰명 추가 ----
+  var chSheet = ss.getSheetByName('map_channel');
+  if (chSheet && unknownShops.length > 0) {
+    ensureHeader_(chSheet, 6, '매핑출처');
+    var chRows = [];
+    var chColors = [];
+    for (var u = 0; u < unknownShops.length; u++) {
+      var shop = unknownShops[u];
+      var cg = inferChannel_(shop, chMap);
+      if (cg) {
+        chRows.push([shop, cg.group, 'Y', cg.fee, cg.manager, cg.source + ' (' + cg.basis + ')']);
+        chColors.push(FILL_COLOR_INFER);
+        result.channels.push({ shop: shop, group: cg.group, fee: cg.fee, manager: cg.manager, source: cg.source, basis: cg.basis });
+        result.filledShops[shop] = true;
+        result.changed = true;
+      } else {
+        chRows.push([shop, '', 'Y', '', '', '미해결']);
+        chColors.push(FILL_COLOR_OPEN);
+        result.channelsOpen.push(shop);
+        result.changed = true; // 행이 추가되므로 재로드 필요(값은 미매핑 그대로)
+      }
+    }
+    var chStart = chSheet.getLastRow() + 1;
+    chSheet.getRange(chStart, 1, chRows.length, 6).setValues(chRows);
+    for (var c = 0; c < chRows.length; c++) chSheet.getRange(chStart + c, 1, 1, 6).setBackground(chColors[c]);
+    chSheet.getRange(chStart, 4, chRows.length, 1).setNumberFormat('0.0%'); // 0.15 → 15.0% (기존 행과 같은 표기)
+  }
+
+  // ---- map_cost: 완전히 새 단품만 빈 행으로 ----
+  var costSheet = ss.getSheetByName('map_cost');
+  var costNames = Object.keys(costNeeded).filter(function(n) { return n.indexOf(' * ') < 0 && n.indexOf('+') < 0; });
+  if (costSheet && costNames.length > 0) {
+    var costStart = costSheet.getLastRow() + 1;
+    var costRows = costNames.map(function(n) { return [n, '', '', '']; });
+    costSheet.getRange(costStart, 1, costRows.length, 4).setValues(costRows);
+    costSheet.getRange(costStart, 1, costRows.length, 4).setBackground(FILL_COLOR_OPEN);
+    result.costsAdded = costNames;
+  }
+
+  return result;
+}
+
+function fillSummaryText_(fill, fillError) {
+  if (fillError) return '매핑 자동 채움: 실패 (' + fillError + ')';
+  if (!fill) return '매핑 자동 채움: 실행 안 됨';
+  var c = fill.counts;
+  return '매핑 자동: 상품 ' + fill.products.length +
+    '(일치 ' + c.match + '·배수 ' + c.multiple + '·세트 ' + c.set + '·유사 ' + c.fuzzy + ')' +
+    ' · 채널 ' + fill.channels.length +
+    ' · 미해결 ' + (fill.productsOpen.length + fill.channelsOpen.length) +
+    ' · 원가 입력 필요 ' + fill.costsAdded.length +
+    ' → ' + REPORT_SHEET_NAME + ' 탭';
+}
+
+// 최근 N일 가공 행에서 쇼핑몰명 / 품목명 / 표준품목명별 행 수·매출을 집계합니다.
+function recentImpact_(rows) {
+  var maxDate = '';
+  var i;
+  for (i = 0; i < rows.length; i++) {
+    var d = normalizeDateOnly_(rows[i][7] || rows[i][6]);
+    if (d > maxDate) maxDate = d;
+  }
+  var cutoff = '';
+  if (maxDate) {
+    var dt = new Date(maxDate + 'T00:00:00');
+    dt.setDate(dt.getDate() - REPORT_RECENT_DAYS);
+    cutoff = normalizeDateOnly_(dt);
+  }
+  var byShop = {}, byItem = {}, byStd = {};
+  var add = function(map, key, rev) {
+    if (!key) return;
+    if (!map[key]) map[key] = { rows: 0, rev: 0 };
+    map[key].rows++;
+    map[key].rev += rev;
+  };
+  for (i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var date = normalizeDateOnly_(r[7] || r[6]);
+    if (cutoff && date < cutoff) continue;
+    var rev = num_(r[3]);
+    add(byShop, text_(r[5]), rev);
+    add(byItem, text_(r[1]), rev);
+    add(byStd, text_(r[9]), rev);
+  }
+  return { cutoff: cutoff, maxDate: maxDate, byShop: byShop, byItem: byItem, byStd: byStd };
+}
+
+function impactOf_(map, key) {
+  var v = map[key];
+  return v ? v : { rows: 0, rev: 0 };
+}
+
+// '점검_리포트' 탭. 매 실행 덮어씁니다.
+function writeCheckReport_(ss, ctx) {
+  var sheet = ss.getSheetByName(REPORT_SHEET_NAME) || ss.insertSheet(REPORT_SHEET_NAME);
+  sheet.clear();
+  var fill = ctx.fill;
+  var impact = recentImpact_(ctx.rows || []);
+  var period = impact.cutoff ? (impact.cutoff + ' ~ ' + impact.maxDate) : '-';
+
+  var review = []; // 검토 필요 (파랑)
+  var todo = [];   // 사람이 채울 것 (노랑)
+  var i;
+  if (fill) {
+    for (i = 0; i < fill.products.length; i++) {
+      var p = fill.products[i];
+      if (p.source.indexOf('추론') !== 0) continue;
+      var pi = impactOf_(impact.byItem, p.name);
+      review.push(['map_product', p.name, '표준 ' + p.std + ' / ' + (p.cat || '') + (p.parts ? ' / ' + p.parts : ''), p.source, pi.rows, pi.rev]);
+    }
+    for (i = 0; i < fill.channels.length; i++) {
+      var ch = fill.channels[i];
+      var ci = impactOf_(impact.byShop, ch.shop);
+      review.push(['map_channel', ch.shop, ch.group + ' / 수수료 ' + Math.round(ch.fee * 1000) / 10 + '% / ' + ch.manager + ' — 수수료 확인', ch.source + ' (' + ch.basis + ')', ci.rows, ci.rev]);
+    }
+    for (i = 0; i < fill.productsOpen.length; i++) {
+      var oi = impactOf_(impact.byItem, fill.productsOpen[i]);
+      todo.push(['map_product', fill.productsOpen[i], 'B 표준품목명 · C 상품군 (· E 구성단품)', oi.rows, oi.rev]);
+    }
+    for (i = 0; i < fill.channelsOpen.length; i++) {
+      var si = impactOf_(impact.byShop, fill.channelsOpen[i]);
+      todo.push(['map_channel', fill.channelsOpen[i], 'B 채널그룹 · D 수수료율 · E 담당자', si.rows, si.rev]);
+    }
+    for (i = 0; i < fill.costsAdded.length; i++) {
+      var ki = impactOf_(impact.byStd, fill.costsAdded[i]);
+      todo.push(['map_cost', fill.costsAdded[i], 'B 단품원가 (새 단품)', ki.rows, ki.rev]);
+    }
+    for (i = 0; i < fill.productDupes.length; i++) {
+      var di = impactOf_(impact.byItem, fill.productDupes[i]);
+      todo.push(['map_product', fill.productDupes[i], '원본 품목명 중복 행 — 하나만 남기기', di.rows, di.rev]);
+    }
+  }
+  // 원가 0/1인 표준품목명 (매출이 있는 것만)
+  var costMap = ctx.costMap || {};
+  for (var std in impact.byStd) {
+    if (!std || std === '미매핑') continue;
+    var cost = costMap[std];
+    if (cost !== undefined && cost <= 1 && impact.byStd[std].rev > 0) {
+      todo.push(['map_cost', std, 'B 단품원가가 ' + cost + ' — 실제 원가 입력', impact.byStd[std].rows, impact.byStd[std].rev]);
+    }
+  }
+  review.sort(function(a, b) { return b[5] - a[5]; });
+  todo.sort(function(a, b) { return b[4] - a[4]; });
+
+  var out = [];
+  out.push(['점검 리포트', new Date().toLocaleString('ko-KR'), '', '', '', '']);
+  out.push(['갱신 모드', ctx.mode, '', '', '', '']);
+  out.push(['자동 채움', fill ? ('상품 ' + fill.products.length + ' · 채널 ' + fill.channels.length) : (ctx.fillError ? '실패: ' + ctx.fillError : '-'), '', '', '', '']);
+  out.push(['검토 필요(파랑)', review.length, '사람이 채울 것(노랑)', todo.length, '', '']);
+  out.push(['영향 집계 기간', period, '최근 ' + REPORT_RECENT_DAYS + '일 · 가공_데이터 기준', '', '', '']);
+  out.push(['', '', '', '', '', '']);
+  var reviewHeaderRow = out.length + 1;
+  out.push(['[검토 필요] 시트', '키', '채운 값', '출처', '최근 행수', '최근 매출']);
+  if (!review.length) out.push(['-', '없음', '', '', '', '']);
+  for (i = 0; i < review.length; i++) out.push(review[i]);
+  out.push(['', '', '', '', '', '']);
+  var todoHeaderRow = out.length + 1;
+  out.push(['[사람이 채울 것] 시트', '키', '비어 있는 열 / 조치', '최근 행수', '최근 매출', '']);
+  if (!todo.length) out.push(['-', '없음', '', '', '', '']);
+  for (i = 0; i < todo.length; i++) out.push(todo[i].concat(['']));
+
+  sheet.getRange(1, 1, out.length, 6).setValues(out);
+  sheet.getRange(1, 1, 1, 6).setFontWeight('bold');
+  [reviewHeaderRow, todoHeaderRow].forEach(function(r) {
+    sheet.getRange(r, 1, 1, 6).setFontWeight('bold').setBackground('#1F2937').setFontColor('#FFFFFF');
+  });
+  if (review.length) sheet.getRange(reviewHeaderRow + 1, 1, review.length, 6).setBackground(FILL_COLOR_INFER);
+  if (todo.length) sheet.getRange(todoHeaderRow + 1, 1, todo.length, 6).setBackground(FILL_COLOR_OPEN);
+  if (review.length) sheet.getRange(reviewHeaderRow + 1, 6, review.length, 1).setNumberFormat('#,##0');
+  if (todo.length) sheet.getRange(todoHeaderRow + 1, 5, todo.length, 1).setNumberFormat('#,##0');
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 360);
+  sheet.setColumnWidth(3, 420);
+  sheet.setColumnWidth(4, 180);
+  sheet.setColumnWidth(5, 90);
+  sheet.setColumnWidth(6, 120);
 }
 
 // ============================================================
