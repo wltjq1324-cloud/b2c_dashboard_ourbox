@@ -10,7 +10,7 @@
 - 캐시 테스트 대시보드: `sales-progress-dashboard-prototype-20260512-cache.html`
 - 기존 프로토타입: `sales-progress-dashboard-prototype-20260512.html`
 - 데이터 원본: Google Sheets `raw_orders`, `가공_데이터`, `map_channel`, `map_product`, `map_cost`
-- Apps Script 현재 기준: **v3.8.1** — `apps-script-v3.8.1.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
+- Apps Script 현재 기준: **v3.9** — `apps-script-v3.9.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
 
 ## Apps Script 자동 배포 (GitHub Actions + clasp)
 
@@ -55,6 +55,28 @@ python3 build_index.py
 ```
 
 운영 배포 파일은 보호 대상입니다. 검증은 `dashboard.src.html`을 로컬에서 열어 먼저 합니다.
+
+## 2026-10-07 Apps Script v3.9 — 큰 읽기·쓰기를 Sheets 고급 서비스로
+
+v3.8.1 전체 재생성 203초 중 **가공_데이터 전체 쓰기가 183초**였습니다(12만 행 × 17열을 2,000행씩 60번 `setValues`).
+Sheets 고급 서비스(`Sheets.Spreadsheets.Values.update/get`)는 같은 양을 2만~4만 행 단위 HTTP 요청으로 처리해 훨씬 빠릅니다.
+
+### 1회 설정 (클릭 3번)
+
+1. Apps Script 편집기 → 왼쪽 "서비스" 옆 **+**
+2. **Google Sheets API** 선택 → 식별자 `Sheets` 그대로 → **추가**
+3. 코드 교체 후 첫 🔄 갱신 때 스프레드시트 접근 권한 확인 창이 한 번 뜹니다 → 허용
+
+서비스를 추가하지 않아도 동작합니다. `Sheets`가 없으면 `getValuesChunked_`/`setValuesChunked_`가 v3.8.1의 `getRange` 청크 방식으로 자동 폴백합니다.
+API 호출이 중간에 실패해도 같은 범위를 폴백이 덮어쓰므로 결과는 같습니다.
+
+### 바뀐 곳
+
+- `getValuesChunked_`: API 4만 행 단위 `Values.get`(UNFORMATTED_VALUE, 날짜는 문자열). API가 생략하는 뒤쪽 빈 셀·빈 행을 `getValues()`와 같은 모양으로 채웁니다.
+- `setValuesChunked_`: API 2만 행 단위 `Values.update`(RAW). 가공_데이터 전체 쓰기·추가 쓰기·dashboard_cache 쓰기가 전부 이 경로를 탑니다.
+- 셤 테스트: API mock 경로와 폴백 경로 모두 15만 행 전체 재생성·증분·변화 없음 통과, 가공_데이터 `getValues` 호출 0회(API 경로).
+
+실측은 교체 후 🔄 갱신 팝업의 `소요 시간:` 줄로 확인합니다.
 
 ## 2026-10-07 Apps Script v3.8.1 — "스프레드시트 서비스가 타임아웃되었습니다" 수정
 
@@ -116,7 +138,7 @@ v3.8 첫 실행이 raw 120,984행에서 `ID가 …인 문서에 액세스하는 
 
 ### 배포 순서
 
-1. Apps Script 편집기 → 코드 전체를 `apps-script-v3.8.1.js`로 교체 → 저장 (웹앱 응답 코드는 그대로라 새 버전 배포는 선택)
+1. Apps Script 편집기 → 코드 전체를 `apps-script-v3.9.js`로 교체 → 저장 (웹앱 응답 코드는 그대로라 새 버전 배포는 선택)
    (자동 배포 파이프라인 설정 뒤에는 이 단계가 사라집니다 — 위 '자동 배포' 절)
 2. 시트 새로고침 → 평소대로 raw_orders 붙여넣기 → `🔄 갱신`. 첫 실행이 백로그를 채우고 필요하면 스스로 전체 재생성합니다.
    당장 돌리고 싶으면 `🧭 매핑 백로그 자동 채움`.
