@@ -1,5 +1,5 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.8
+// 아워박스 MVP 대시보드 — Apps Script v3.8.1
 // ============================================================
 // 이 파일 전체를 Apps Script 편집기의 기존 v3.7 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
@@ -65,6 +65,12 @@
 //   - '점검_리포트' 탭: 검토 필요(파랑)·사람이 채울 것(노랑)을 최근 30일 매출 영향 순으로 정렬.
 //   - 채운 키가 과거 가공_데이터에 미매핑으로 남아 있으면 이번 실행을 전체 재생성으로 전환합니다.
 //   - 메뉴 '🧭 매핑 백로그 자동 채움': 쌓인 미매핑 전부에 같은 추론을 돌리고 전체 재생성.
+//
+// v3.8.1 변경 (12만 행에서 '스프레드시트 서비스가 타임아웃되었습니다' 수정):
+//   - 12만 행 × 17열을 한 번에 읽던 getValues 6곳을 getValuesChunked_(2만 행씩)로 교체.
+//   - 쓰기 청크 4,000행 → 2,000행. 서식 적용도 청크로.
+//   - 기존 가공_데이터 읽기는 필요할 때만(새 행이 있거나, 자동 채움이 뭔가 바꿨을 때). '변경 없음' 실행은 다시 수 초.
+//   - 자동 채움이 map_product 행마다 쓰기 4회 → 메모리에서 채운 뒤 setValues 1회 + 배경은 색이 같은 연속 구간별 1회.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -207,7 +213,7 @@ function refreshProcessedDataCore_(forceFull) {
   var rawStart = incremental ? state.rawCount + 2 : 2;
   var rawRowsToRead = incremental ? rawCount - state.rawCount : rawCount;
   var rawData = rawRowsToRead > 0
-    ? rawSheet.getRange(rawStart, 1, rawRowsToRead, 7).getValues()
+    ? getValuesChunked_(rawSheet, rawStart, 1, rawRowsToRead, 7)
     : [];
   timer.mark('raw 읽기');
 
@@ -216,21 +222,25 @@ function refreshProcessedDataCore_(forceFull) {
   updateMappingStatus(ss, costMap);
   timer.mark('map_product 정리');
 
-  // 5. 증분이면 기존 가공_데이터를 읽어 둡니다 (출고배송비 첫 행 판정 + 캐시 재생성 + 백로그 판정용).
-  //    읽기는 쓰기보다 훨씬 싸서 이 비용은 감수합니다.
+  // 5. 증분이면 기존 가공_데이터가 필요합니다 (출고배송비 첫 행 판정 + 캐시 재생성 + 백로그 판정).
+  //    12만 행 읽기는 비싸므로 **필요할 때만** 읽습니다. 새 행이 0건이고 캐시가 멀쩡하면 읽지 않습니다.
   var cacheSheet = ss.getSheetByName('dashboard_cache');
   var cacheMissing = !cacheSheet || cacheSheet.getLastRow() < 2;
   var seenOrders = {};
   var existingRows = [];
+  var existingLoaded = false;
   var nothingToDo = incremental && rawData.length === 0 && !cacheMissing;
-  if (incremental && procCount > 0) {
-    existingRows = procSheet.getRange(2, 1, procCount, PROC_HEADERS.length).getValues();
+  var loadExisting = function() {
+    if (existingLoaded || !incremental || procCount <= 0) return;
+    existingRows = getValuesChunked_(procSheet, 2, 1, procCount, PROC_HEADERS.length);
     for (var e = 0; e < existingRows.length; e++) {
       var oid = text_(existingRows[e][0]);
       if (oid) seenOrders[oid] = true;
     }
+    existingLoaded = true;
     timer.mark('가공_데이터 읽기');
-  }
+  };
+  if (!nothingToDo) loadExisting();
 
   // 5b. 매핑 자동 채움 — 새 쇼핑몰명(raw 신규 행 + 과거 미매핑 행) / 표준품목명이 빈 map_product 행
   var fill = null;
@@ -253,14 +263,29 @@ function refreshProcessedDataCore_(forceFull) {
     mapSummary = mapSummary_(chMap, prMap, costMap, shipCost);
 
     // 채운 키가 과거 가공_데이터에 미매핑으로 남아 있으면 과거 행도 다시 계산해야 합니다 → 전체 재생성
-    if (incremental && hasBacklogRows_(existingRows, fill)) {
-      incremental = false;
-      decision = { mode: 'full', reason: 'auto_fill_backlog' };
-      rawData = rawSheet.getRange(2, 1, rawCount, 7).getValues();
-      existingRows = [];
-      seenOrders = {};
-      nothingToDo = false;
-      timer.mark('raw 전체 재읽기');
+    if (incremental) {
+      loadExisting();
+      // 기존 행을 읽은 김에 과거에 미매핑으로 흘러간 쇼핑몰명도 이번에 같이 채웁니다 (2차 패스)
+      try {
+        var moreShops = collectUnknownShops_([], existingRows, chMap);
+        if (moreShops.length > 0) {
+          fillChannels_(ss, moreShops, chMap, fill);
+          chMap = loadChannelMap(ss);
+          mapSig = mapSignature_(chMap, prMap, costMap, shipCost);
+          mapSummary = mapSummary_(chMap, prMap, costMap, shipCost);
+        }
+      } catch (err2) {
+        Logger.log('fillChannels_ 2차 실패: ' + err2.message);
+      }
+      if (hasBacklogRows_(existingRows, fill)) {
+        incremental = false;
+        decision = { mode: 'full', reason: 'auto_fill_backlog' };
+        rawData = getValuesChunked_(rawSheet, 2, 1, rawCount, 7);
+        existingRows = [];
+        seenOrders = {};
+        nothingToDo = false;
+        timer.mark('raw 전체 재읽기');
+      }
     }
   }
 
@@ -519,7 +544,7 @@ function writeProcessedFull_(ss, procSheet, rows) {
     .setFontColor('#FFFFFF');
 
   if (rows.length > 0) {
-    setValuesChunked_(procSheet, 2, 1, rows, 4000);
+    setValuesChunked_(procSheet, 2, 1, rows, WRITE_CHUNK_ROWS);
     applyProcessedFormats_(procSheet, 2, rows.length);
     procSheet.getRange(1, 1, rows.length + 1, PROC_HEADERS.length).createFilter();
   }
@@ -529,7 +554,7 @@ function writeProcessedFull_(ss, procSheet, rows) {
 function appendProcessedRows_(procSheet, procCount, rows) {
   if (rows.length === 0) return;
   var startRow = procCount + 2;
-  setValuesChunked_(procSheet, startRow, 1, rows, 4000);
+  setValuesChunked_(procSheet, startRow, 1, rows, WRITE_CHUNK_ROWS);
   applyProcessedFormats_(procSheet, startRow, rows.length);
 
   // 필터 범위는 자동으로 늘어나지 않아서 새 행까지 포함해 다시 만듭니다.
@@ -538,9 +563,14 @@ function appendProcessedRows_(procSheet, procCount, rows) {
 }
 
 function applyProcessedFormats_(sheet, startRow, count) {
-  sheet.getRange(startRow, 4, count, 1).setNumberFormat('#,##0');
-  sheet.getRange(startRow, 12, count, 1).setNumberFormat('0.0%');
-  sheet.getRange(startRow, 13, count, 4).setNumberFormat('#,##0');
+  // 서식도 큰 범위 한 번은 타임아웃 위험이 있어 쓰기 청크와 같은 크기로 나눕니다.
+  for (var offset = 0; offset < count; offset += READ_CHUNK_ROWS) {
+    var n = Math.min(READ_CHUNK_ROWS, count - offset);
+    var r = startRow + offset;
+    sheet.getRange(r, 4, n, 1).setNumberFormat('#,##0');
+    sheet.getRange(r, 12, n, 1).setNumberFormat('0.0%');
+    sheet.getRange(r, 13, n, 4).setNumberFormat('#,##0');
+  }
 }
 
 function timer_() {
@@ -734,10 +764,26 @@ function getUnmappedInfo(ss) {
   return unmapped;
 }
 
+// 큰 범위 읽기. 한 번에 2만 행(×17열 = 34만 셀) 이하로 나눠 읽어야 시트 서비스 타임아웃을 피합니다.
+var READ_CHUNK_ROWS = 20000;
+var WRITE_CHUNK_ROWS = 2000;
+
+function getValuesChunked_(sheet, startRow, startCol, numRows, numCols, chunkRows) {
+  if (numRows <= 0) return [];
+  chunkRows = chunkRows || READ_CHUNK_ROWS;
+  var out = [];
+  for (var offset = 0; offset < numRows; offset += chunkRows) {
+    var n = Math.min(chunkRows, numRows - offset);
+    var part = sheet.getRange(startRow + offset, startCol, n, numCols).getValues();
+    for (var i = 0; i < part.length; i++) out.push(part[i]);
+  }
+  return out;
+}
+
 function setValuesChunked_(sheet, startRow, startCol, values, chunkSize, flushEachChunk) {
   if (!values || values.length === 0) return;
 
-  chunkSize = chunkSize || 4000;
+  chunkSize = chunkSize || WRITE_CHUNK_ROWS;
   for (var offset = 0; offset < values.length; offset += chunkSize) {
     var chunk = values.slice(offset, offset + chunkSize);
     sheet.getRange(startRow + offset, startCol, chunk.length, chunk[0].length).setValues(chunk);
@@ -750,7 +796,7 @@ function setValuesChunked_(sheet, startRow, startCol, values, chunkSize, flushEa
 function readProcessedSheet(sheet) {
   var lastRow = sheet.getLastRow();
   var lastCol = Math.max(sheet.getLastColumn(), 17);
-  var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var data = getValuesChunked_(sheet, 2, 1, lastRow - 1, lastCol);
   var orders = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -784,7 +830,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.8'
+      version: 'v3.8.1'
     }
   };
 }
@@ -795,7 +841,7 @@ function buildFromRawFallback(ss) {
     return { orders: [], meta: { source: 'raw_orders', rows: 0 } };
   }
 
-  var rawData = rawSheet.getRange(2, 1, rawSheet.getLastRow() - 1, 7).getValues();
+  var rawData = getValuesChunked_(rawSheet, 2, 1, rawSheet.getLastRow() - 1, 7);
   var rows = buildProcessedRows_(
     rawData, loadChannelMap(ss), loadProductMap(ss), loadCostMap(ss), loadShipCost(ss), {}
   );
@@ -807,7 +853,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.8'
+      version: 'v3.8.1'
     }
   };
 }
@@ -1070,7 +1116,7 @@ function readProcessedOrdersForCache_(ss) {
     return fallback.orders || [];
   }
 
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, PROC_HEADERS.length).getValues();
+  var data = getValuesChunked_(sheet, 2, 1, sheet.getLastRow() - 1, PROC_HEADERS.length);
   return data.map(function(row, i) {
     return processedRowToOrder_(row, i);
   }).filter(function(order) {
@@ -1168,7 +1214,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.8',
+    version: 'v3.8.1',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -1543,12 +1589,14 @@ function fillMappings_(ss, unknownShops, chMap, prMap, costMap) {
   var index = buildProductIndex_(prMap);
   var costNeeded = {};
 
-  // ---- map_product: 표준품목명이 빈 행 ----
+  // ---- map_product: 표준품목명이 빈 행 (메모리에서 채운 뒤 한 번에 씀) ----
   var prSheet = ss.getSheetByName('map_product');
   if (prSheet && prSheet.getLastRow() > 1) {
     ensureHeader_(prSheet, 7, '매핑출처');
     var prLast = prSheet.getLastRow();
     var prData = prSheet.getRange(2, 1, prLast - 1, 7).getValues();
+    var rowColors = [];   // 바뀐 행만 색 지정 (index = 행 offset)
+    var touched = false;
     var nameCount = {};
     var i;
     for (i = 0; i < prData.length; i++) {
@@ -1558,21 +1606,22 @@ function fillMappings_(ss, unknownShops, chMap, prMap, costMap) {
     for (i = 0; i < prData.length; i++) {
       var origName = text_(prData[i][0]);
       if (!origName || origName === '-') continue;
-      var rowNo = i + 2;
       if (nameCount[origName] > 1 && result.productDupes.indexOf(origName) < 0) result.productDupes.push(origName);
       if (text_(prData[i][1])) continue; // 사람이 채운 행은 건드리지 않음
 
       var guess = inferProduct_(origName, index);
       if (guess) {
-        prSheet.getRange(rowNo, 2, 1, 2).setValues([[guess.std, guess.cat || '']]);
-        prSheet.getRange(rowNo, 5).setValue(guess.parts || '');
-        prSheet.getRange(rowNo, 7).setValue(guess.source);
-        prSheet.getRange(rowNo, 1, 1, 7).setBackground(guess.source.indexOf('추론') === 0 ? FILL_COLOR_INFER : FILL_COLOR_AUTO);
+        prData[i][1] = guess.std;
+        prData[i][2] = guess.cat || '';
+        prData[i][4] = guess.parts || '';
+        prData[i][6] = guess.source;
+        rowColors[i] = guess.source.indexOf('추론') === 0 ? FILL_COLOR_INFER : FILL_COLOR_AUTO;
+        touched = true;
         result.products.push({ name: origName, std: guess.std, cat: guess.cat, parts: guess.parts, source: guess.source });
         result.filledItems[origName] = true;
+        result.changed = true;
         var newKey = normItem_(origName);
         if (newKey && !index[newKey]) index[newKey] = { std: guess.std, cat: guess.cat, parts: guess.parts };
-        result.changed = true;
         if (guess.source === '자동·일치') result.counts.match++;
         else if (guess.source === '자동·배수') result.counts.multiple++;
         else if (guess.source === '자동·세트') result.counts.set++;
@@ -1584,14 +1633,44 @@ function fillMappings_(ss, unknownShops, chMap, prMap, costMap) {
           if (bn && !costMap[bn]) costNeeded[bn] = true;
         }
       } else {
-        prSheet.getRange(rowNo, 7).setValue('미해결');
-        prSheet.getRange(rowNo, 1, 1, 7).setBackground(FILL_COLOR_OPEN);
+        if (prData[i][6] !== '미해결') { prData[i][6] = '미해결'; touched = true; }
+        rowColors[i] = FILL_COLOR_OPEN;
         result.productsOpen.push(origName);
+      }
+    }
+    if (touched) {
+      // 사람이 쓴 값은 읽은 그대로 되쓰므로 바뀌지 않습니다. 쓰기는 이 한 번뿐입니다.
+      prSheet.getRange(2, 1, prData.length, 7).setValues(prData);
+    }
+    // 색은 같은 색이 이어지는 구간마다 1회 (보통 새 행이 끝에 몰려 있어 1~3회)
+    var runStart = -1, runColor = '';
+    for (i = 0; i <= prData.length; i++) {
+      var c = i < prData.length ? (rowColors[i] || '') : '';
+      if (c !== runColor) {
+        if (runColor) prSheet.getRange(runStart + 2, 1, i - runStart, 7).setBackground(runColor);
+        runStart = i; runColor = c;
       }
     }
   }
 
-  // ---- map_channel: 없는 쇼핑몰명 추가 ----
+  fillChannels_(ss, unknownShops, chMap, result);
+
+  // ---- map_cost: 완전히 새 단품만 빈 행으로 ----
+  var costSheet = ss.getSheetByName('map_cost');
+  var costNames = Object.keys(costNeeded).filter(function(n) { return n.indexOf(' * ') < 0 && n.indexOf('+') < 0; });
+  if (costSheet && costNames.length > 0) {
+    var costStart = costSheet.getLastRow() + 1;
+    var costRows = costNames.map(function(n) { return [n, '', '', '']; });
+    costSheet.getRange(costStart, 1, costRows.length, 4).setValues(costRows);
+    costSheet.getRange(costStart, 1, costRows.length, 4).setBackground(FILL_COLOR_OPEN);
+    result.costsAdded = costNames;
+  }
+
+  return result;
+}
+
+// map_channel에 없는 쇼핑몰명을 추론해 추가합니다. result에 누적합니다(두 번 호출 가능).
+function fillChannels_(ss, unknownShops, chMap, result) {
   var chSheet = ss.getSheetByName('map_channel');
   if (chSheet && unknownShops.length > 0) {
     ensureHeader_(chSheet, 6, '매핑출처');
@@ -1615,22 +1694,10 @@ function fillMappings_(ss, unknownShops, chMap, prMap, costMap) {
     }
     var chStart = chSheet.getLastRow() + 1;
     chSheet.getRange(chStart, 1, chRows.length, 6).setValues(chRows);
-    for (var c = 0; c < chRows.length; c++) chSheet.getRange(chStart + c, 1, 1, 6).setBackground(chColors[c]);
+    chSheet.getRange(chStart, 1, chRows.length, 6).setBackgrounds(chColors.map(function(c) { return [c, c, c, c, c, c]; }));
     chSheet.getRange(chStart, 4, chRows.length, 1).setNumberFormat('0.0%'); // 0.15 → 15.0% (기존 행과 같은 표기)
   }
 
-  // ---- map_cost: 완전히 새 단품만 빈 행으로 ----
-  var costSheet = ss.getSheetByName('map_cost');
-  var costNames = Object.keys(costNeeded).filter(function(n) { return n.indexOf(' * ') < 0 && n.indexOf('+') < 0; });
-  if (costSheet && costNames.length > 0) {
-    var costStart = costSheet.getLastRow() + 1;
-    var costRows = costNames.map(function(n) { return [n, '', '', '']; });
-    costSheet.getRange(costStart, 1, costRows.length, 4).setValues(costRows);
-    costSheet.getRange(costStart, 1, costRows.length, 4).setBackground(FILL_COLOR_OPEN);
-    result.costsAdded = costNames;
-  }
-
-  return result;
 }
 
 function fillSummaryText_(fill, fillError) {
