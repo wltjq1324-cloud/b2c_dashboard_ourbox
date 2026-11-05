@@ -40,7 +40,7 @@
     .top{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;margin-bottom:18px}
     .top h1{margin:0;font-size:25px;font-weight:900}.top p{margin:5px 0 0;color:var(--muted);font-size:13px}
     .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pill{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:800;color:#475569}
-    .status{background:#e8f7ef;color:#137343;border-color:#bce9cf}.status.fail{background:#fee2e2;color:#991b1b;border-color:#fecaca}.status.loading{background:#eaf1ff;color:#1e4fbf;border-color:#bfdbfe}
+    .status{background:#e8f7ef;color:#137343;border-color:#bce9cf}.status.fail{background:#fee2e2;color:#991b1b;border-color:#fecaca}.status.loading{background:#eaf1ff;color:#1e4fbf;border-color:#bfdbfe}.status.warn{background:#fff7e6;color:#92400e;border-color:#fde68a}
     .btn{border:0;border-radius:8px;background:#16385f;color:white;padding:9px 14px;font-size:12px;font-weight:900}.btn.secondary{background:#eef3f8;color:#223047;border:1px solid var(--line)}
     .filters{display:grid;grid-template-columns:150px 150px 170px 170px 170px 1fr auto;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px;box-shadow:var(--shadow)}
     .field{display:flex;flex-direction:column;gap:5px}.field label{font-size:11px;color:#64748b;font-weight:900}.field input,.field select{height:36px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;padding:0 10px;font-size:13px}.field small{display:block;margin-top:4px;color:#8290a3;font-size:11px}
@@ -237,7 +237,7 @@ async function loadData(){
     normalizeApiResponse(r.json);
     if(!ALL.length)throw new Error('응답에 주문 데이터가 없습니다'+(SERVER_META.warning?' ('+SERVER_META.warning+')':''));
     let t0=performance.now();
-    initControls(); setStatus('',DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더'); $('sideStatus').textContent='Google Sheets 연결 완료'; renderAll();
+    initControls(); let onDemand=r.stats.servedFrom==='built_on_demand'; setStatus(onDemand?'warn':'',onDemand?'캐시 없음 · 자동 복구 대기':(DATA_MODE==='server-cache'?'요약 캐시 연결':'브라우저 캐시 렌더')); $('statusPill').title=onDemand?'요약 캐시가 없어 이번에는 즉석으로 만들어 느렸습니다. 1시간마다 도는 자동 점검이 캐시를 다시 만듭니다. 급하면 스프레드시트 메뉴 \'대시보드 캐시만 갱신\'을 누르세요.':''; $('sideStatus').textContent='Google Sheets 연결 완료'; renderAll();
     r.stats.renderMs=Math.round(performance.now()-t0); LOAD_STATS={summary:r.stats}; updateSideMeta();
     console.log('[ourbox] first paint '+fmtMs(performance.now())+' since navigation · server meta',SERVER_META);
     if(QUALITY_PENDING)loadQualityRows();
