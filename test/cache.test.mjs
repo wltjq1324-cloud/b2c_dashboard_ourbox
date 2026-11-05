@@ -11,30 +11,42 @@ const FILE = readdirSync(ROOT).filter((f) => /^apps-script-v[\d.]+\.js$/.test(f)
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
 const CODE = readFileSync(new URL(FILE, ROOT), 'utf8');
 
+function writeCells(sheet, r, c, rows) {
+  rows.forEach((row, i) => {
+    const at = r - 1 + i;
+    while (sheet.values.length <= at) sheet.values.push([]);
+    row.forEach((cell, j) => { sheet.values[at][c - 1 + j] = cell; });
+  });
+}
+
+function readCells(sheet, r, c, nr, nc) {
+  const out = [];
+  for (let i = 0; i < nr; i++) {
+    const src = sheet.values[r - 1 + i] || [];
+    const row = [];
+    for (let j = 0; j < nc; j++) row.push(src[c - 1 + j] ?? '');
+    out.push(row);
+  }
+  return out;
+}
+
 class Range {
   constructor(sheet, r, c, nr = 1, nc = 1) { Object.assign(this, { sheet, r, c, nr, nc }); }
   getValues() {
-    const out = [];
-    for (let i = 0; i < this.nr; i++) {
-      const src = this.sheet.values[this.r - 1 + i] || [];
-      const row = [];
-      for (let j = 0; j < this.nc; j++) row.push(src[this.c - 1 + j] ?? '');
-      out.push(row);
-    }
-    return out;
+    this.sheet.ss.flushPending();
+    return readCells(this.sheet, this.r, this.c, this.nr, this.nc);
   }
   setValues(v) {
     if (this.sheet.writeHook) this.sheet.writeHook(this, v);
-    v.forEach((row, i) => {
-      const at = this.r - 1 + i;
-      while (this.sheet.values.length <= at) this.sheet.values.push([]);
-      row.forEach((cell, j) => { this.sheet.values[at][this.c - 1 + j] = cell; });
-    });
+    const copy = v.map((row) => row.slice());
+    this.sheet.ss.later(() => writeCells(this.sheet, this.r, this.c, copy));
     return this;
   }
   setFontWeight() { return this; }
   setBackground() { return this; }
   setFontColor() { return this; }
+  setNumberFormat() { return this; }
+  createFilter() { return this; }
 }
 
 class Sheet {
@@ -47,18 +59,24 @@ class Sheet {
     return this;
   }
   getParent() { return this.ss; }
-  getLastRow() { return this.values.length; }
-  getLastColumn() { return this.values.reduce((m, r) => Math.max(m, r.length), 0); }
+  getLastRow() { this.ss.flushPending(); return this.values.length; }
+  getLastColumn() { this.ss.flushPending(); return this.values.reduce((m, r) => Math.max(m, r.length), 0); }
   getRange(r, c, nr, nc) { return new Range(this, r, c, nr, nc); }
   setColumnWidth() { return this; }
   hideSheet() { this.hidden = true; return this; }
   isSheetHidden() { return this.hidden; }
   getFilter() { return null; }
-  clear() { this.values = []; return this; }
+  clear() { this.ss.later(() => { this.values = []; }); return this; }
 }
 
 class Spreadsheet {
-  constructor() { this.sheets = []; this.active = null; this.renameHook = null; this.insertHook = null; }
+  constructor() {
+    this.sheets = []; this.active = null; this.renameHook = null; this.insertHook = null;
+    this.deferWrites = false; this.pending = [];
+  }
+  // 실제 SpreadsheetApp처럼 값 쓰기·clear()를 모아 두었다가 flush()나 읽기 때 반영한다(deferWrites일 때).
+  later(fn) { if (this.deferWrites) this.pending.push(fn); else fn(); }
+  flushPending() { while (this.pending.length) this.pending.shift()(); }
   getId() { return 'test'; }
   getSheetByName(n) { return this.sheets.find((s) => s.name === n) || null; }
   insertSheet(n, idx) {
@@ -75,15 +93,27 @@ class Spreadsheet {
   setActiveSheet(s) { this.active = s; return s; }
 }
 
-function makeEnv() {
+const colNo = (letters) => [...letters].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+function parseA1(ss, a1) {
+  const m = /^'((?:[^']|'')*)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(a1);
+  const sheet = m && ss.getSheetByName(m[1].replace(/''/g, "'"));
+  if (!sheet) throw new Error(`Unable to parse range: ${a1}`);
+  const r = Number(m[3]);
+  const c = colNo(m[2]);
+  return { sheet, r, c, nr: Number(m[5]) - r + 1, nc: colNo(m[4]) - c + 1 };
+}
+
+// sheetsApi: 편집기에 Sheets 고급 서비스를 켠 운영 환경. 고급 서비스는 모아 둔 SpreadsheetApp 작업을 기다리지 않고 바로 반영된다.
+function makeEnv({ sheetsApi = false } = {}) {
   const ss = new Spreadsheet();
+  ss.deferWrites = sheetsApi;
   const store = new Map();
   const lockState = { busy: false };
   const props = new Map();
   const ctx = {
     console,
     Logger: { log() {} },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush() {}, getUi() { throw new Error('UI 없음'); } },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush: () => ss.flushPending(), getUi() { throw new Error('UI 없음'); } },
     CacheService: {
       getScriptCache: () => ({
         get: (k) => (store.has(k) ? store.get(k) : null),
@@ -99,6 +129,17 @@ function makeEnv() {
     },
     ContentService: { createTextOutput: (t) => ({ text: t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
   };
+  if (sheetsApi) {
+    ctx.Sheets = { Spreadsheets: { Values: {
+      update(body, id, a1) { const p = parseA1(ss, a1); writeCells(p.sheet, p.r, p.c, body.values); return {}; },
+      get(id, a1) {
+        const p = parseA1(ss, a1);
+        const values = readCells(p.sheet, p.r, p.c, p.nr, p.nc);
+        while (values.length && values[values.length - 1].every((v) => v === '')) values.pop(); // API는 뒤쪽 빈 행을 생략한다
+        return { values };
+      },
+    } } };
+  }
   vm.createContext(ctx);
   vm.runInContext(CODE, ctx, { filename: FILE });
   return { ss, store, lockState, props, ctx };
@@ -107,7 +148,13 @@ function makeEnv() {
 // 가짜 가공_데이터 n행(17열). 날짜·채널·상품·담당이 섞여 캐시 섹션이 여러 조각(45,000자)으로 나뉜다
 function seedProcessed(env, n, revenueBase = 10000) {
   const sheet = env.ss.insertSheet('가공_데이터');
-  const rows = [env.ctx.PROC_HEADERS.slice()];
+  sheet.values = [env.ctx.PROC_HEADERS.slice(), ...processedRows(n, revenueBase)];
+  env.ss.setActiveSheet(sheet);
+  return sheet;
+}
+
+function processedRows(n, revenueBase = 10000) {
+  const rows = [];
   const channels = ['채널가', '채널나', '채널다', '채널라'];
   const products = ['감자빵 5개입', '감자빵 10개입', '고구마빵 4개입', '옥수수빵 3개입', '선물세트'];
   for (let i = 0; i < n; i++) {
@@ -117,9 +164,7 @@ function seedProcessed(env, n, revenueBase = 10000) {
       `2026-10-${day} 10:00:00`, `2026-10-${day}`, channels[i % 4], products[i % 5], '빵', 0.05,
       revenue * 0.95, 3000, 2500, revenue * 0.95 - 5500, i % 2 ? '담당A' : '담당B']);
   }
-  sheet.values = rows;
-  env.ss.setActiveSheet(sheet);
-  return sheet;
+  return rows;
 }
 
 const cacheSheet = (env) => env.ss.getSheetByName('dashboard_cache');
@@ -251,6 +296,34 @@ test('지키는 선: 이름만 같은 다른 시트는 지우거나 바꾸지 �
   assert.equal(env.ss.getSheetByName('dashboard_cache_prev'), null);
 });
 
+test('고급 서비스로 쓸 때: 가공_데이터 전체 쓰기는 clear()를 먼저 반영한다(v3.9~v3.10은 머리글만 남았다, 운영 2026-11-05)', () => {
+  const env = makeEnv({ sheetsApi: true });
+  const proc = seedProcessed(env, 40);
+  const fresh = processedRows(120, 20000);
+  env.ctx.writeProcessedFull_(env.ss, proc, fresh);
+  env.ss.flushPending(); // 실행이 끝나면 남은 작업이 반영된다
+  assert.equal(proc.values.length, 121);
+  assert.deepEqual(proc.values[0], Array.from(env.ctx.PROC_HEADERS));
+  assert.deepEqual(proc.values.slice(1), fresh);
+});
+
+test('고급 서비스로 쓸 때: 빈 dashboard_cache 자리에 바꿔 끼우고 남은 임시 시트를 치운다(운영 2026-11-05 상태에서 시작)', () => {
+  const env = makeEnv({ sheetsApi: true });
+  seedProcessed(env, 2000);
+  env.ss.insertSheet('dashboard_cache').hideSheet(); // v3.9가 비워 둔 캐시 시트
+  const left = env.ss.insertSheet('dashboard_cache_next'); // v3.10이 바꿔 끼우지 못하고 남긴 임시 시트
+  left.values = [['section', 'part', 'json'], ['meta', 0, '{}']];
+  const stats = env.ctx.refreshDashboardCache(env.ss);
+  env.ss.flushPending();
+  assert.equal(stats.rawRows, 2000);
+  assert.deepEqual(names(env), ['dashboard_cache', '가공_데이터']);
+  assert.equal(env.ctx.cacheSheetIsComplete_(env.ss), true);
+  expireScriptCache(env);
+  const fromSheet = parse(env.ctx.getDashboardCacheText_('summary'));
+  assert.equal(fromSheet.meta.servedFrom, 'sheet');
+  assert.ok(fromSheet.dashboardCache.baseRows.length > 0);
+});
+
 test('doGet: mode=cache는 JSON 텍스트를 그대로 돌려준다', () => {
   const env = makeEnv();
   seedProcessed(env, 200);
@@ -258,5 +331,5 @@ test('doGet: mode=cache는 JSON 텍스트를 그대로 돌려준다', () => {
   const out = env.ctx.doGet({ parameter: { mode: 'cache', part: 'summary' } });
   const json = parse(out.text);
   assert.ok(Array.isArray(json.dashboardCache.baseRows) && json.dashboardCache.baseRows.length > 0);
-  assert.equal(json.meta.version, 'v3.10');
+  assert.equal(json.meta.version, 'v3.10.1');
 });
