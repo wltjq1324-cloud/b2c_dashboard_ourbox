@@ -10,7 +10,7 @@
 - 캐시 테스트 대시보드: `sales-progress-dashboard-prototype-20260512-cache.html`
 - 기존 프로토타입: `sales-progress-dashboard-prototype-20260512.html`
 - 데이터 원본: Google Sheets `raw_orders`, `가공_데이터`, `map_channel`, `map_product`, `map_cost`
-- Apps Script 현재 기준: **v3.10** — `apps-script-v3.10.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
+- Apps Script 현재 기준: **v3.10.1** — `apps-script-v3.10.1.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
 - 캐시 경로 모의 시험: `node --test test/*.test.mjs` (Node 20+, 설치할 것 없음)
 
 ## Apps Script 자동 배포 (GitHub Actions + clasp)
@@ -57,7 +57,53 @@ python3 build_index.py
 
 운영 배포 파일은 보호 대상입니다. 검증은 `dashboard.src.html`을 로컬에서 열어 먼저 합니다.
 
+## 2026-11-05 Apps Script v3.10.1 — 시트가 빈 채로 남던 원인 고침
+
+증상: v3.10을 붙여넣고 실행하자 "dashboard_cache 시트의 머리글이 캐시 형식이 아니어서 바꾸지 않았습니다" 오류로 멈췄습니다.
+
+원인(2026-11-05 15시 운영 스프레드시트 `*아워박스_DB_초안`을 Sheets 커넥터로 읽어 확인):
+
+| 시트 | 상태 |
+|---|---|
+| `raw_orders` | 정상(원본) |
+| `가공_데이터` | 머리글 1줄만 남고 2행부터 비어 있음 |
+| `dashboard_cache` | 숨김 시트이고 칸이 모두 비어 있음(머리글도 없음) |
+| `dashboard_cache_next` | v3.10이 쓴 온전한 캐시 170줄(바꿔 끼우기 직전에 멈춤) |
+
+v3.9부터 큰 쓰기를 Sheets 고급 서비스(`Values.update`)로 바로 보냅니다. 그런데 바로 앞의 `clear()`와 머리글 쓰기는
+SpreadsheetApp이 모아 두었다가 나중에 반영합니다. 그래서 고급 서비스로 방금 쓴 행을 뒤늦게 반영된 `clear()`가 지웠습니다.
+`가공_데이터`는 머리글(SpreadsheetApp으로 씀)만 남고, `dashboard_cache`는 통째로 비었습니다.
+갱신이 '완료'로 끝나고 스크립트 캐시(6시간)는 채워져서 바로 드러나지 않았습니다.
+그 뒤로는 갱신할 때마다 '가공_데이터 행 수 불일치'로 전체 재생성을 되풀이했고, 스크립트 캐시가 만료되면 웹 요청이 원본으로 즉석 생성해 12~22초가 걸렸습니다.
+v3.10의 안전장치는 이 빈 시트를 '이름만 같은 남의 시트'로 보고 멈춘 것입니다. 원본 `raw_orders`는 어느 버전도 쓰지 않습니다.
+모의 시험으로 같은 증상이 재현됩니다(v3.9: 가공 120행을 쓰면 1행 남음, 캐시 0행. v3.10: 같은 오류 문구).
+
+| 무엇 | 바뀐 점 |
+|---|---|
+| 고급 서비스 읽기·쓰기 | 부르기 전에 `SpreadsheetApp.flush()`로 모아 둔 작업을 먼저 반영합니다(`getValuesChunked_`·`setValuesChunked_` 두 곳) |
+| 바꿔 끼우기 | 값이 한 칸도 없는 `dashboard_cache`는 캐시 자리로 보고 바꿔 끼웁니다. 값이 있는데 머리글이 다른 시트는 전처럼 멈춥니다 |
+| 권한 | 새 서비스·권한 없음 |
+
+적용(존):
+
+1. https://docs.google.com/spreadsheets/d/1C3gJ1gClD5LQlRLsQEBFsu1_MTeIvWKztw6l886MoTQ/edit 를 열고 확장 프로그램 → Apps Script.
+2. https://github.com/wltjq1324-cloud/b2c_dashboard_ourbox/blob/main/apps-script-v3.10.1.js 에서 오른쪽 위 복사 단추(Copy raw file)를 누릅니다.
+3. 편집기 `Code.gs`에서 Ctrl+A → Ctrl+V → Ctrl+S.
+4. 스프레드시트 탭을 새로 고친 뒤 메뉴 📊 아워박스 → 🧹 가공_데이터 전체 재생성. 성공하면 "✅ 가공_데이터 갱신 완료!"와 "모드: 전체 재생성 (수동 실행)", 처리 행 수(원본 행 수와 같은 13만여 건)가 보입니다.
+5. 메뉴 📊 아워박스 → 🩺 대시보드 캐시 점검 → "ok · 시트·스크립트 캐시 모두 있음".
+6. 편집기 배포 → 배포 관리 → 웹앱 배포의 연필 → 버전 '새 버전' → 배포(주소 그대로). v3.10의 트리거를 아직 안 넣었으면 아래 v3.10 적용 3번도 합니다.
+
+실패하면 오류 창의 문구 전체를 캡처해 보내 주세요. 4번까지 끝나면 `가공_데이터`가 다시 채워지고 `dashboard_cache_next`는 저절로 지워집니다.
+
+되돌리기: 편집기 코드를 이전 커밋의 `apps-script-v3.10.js`로 덮어쓰고, 배포 관리에서 이전 버전을 고릅니다. 시트 형식은 같습니다.
+
+모의 시험(`test/cache.test.mjs`, 9개): 기존 7개에 더해 고급 서비스 모드를 흉내 냅니다(SpreadsheetApp 쓰기는 flush·읽기 때 반영, 고급 서비스는 바로 반영).
+가공_데이터 전체 쓰기 뒤 행이 남는지, 빈 `dashboard_cache`와 남은 `_next`에서 시작해 바꿔 끼우는지 봅니다.
+
 ## 2026-11-05 Apps Script v3.10 — 캐시가 사라져 느려지는 일 막기
+
+정정(같은 날, v3.10.1): 아래 원인 추정은 틀렸습니다. 시트는 쓰다 멈춰서가 아니라 v3.9의 고급 서비스 쓰기 순서 때문에 비었습니다(위 절).
+v3.10은 그 원인을 고치지 못했고, 빈 `dashboard_cache`를 만나면 바꿔 끼우지 않고 멈췄습니다.
 
 증상(2026-11-05): 대시보드가 포털 안에서도, 단독으로 열어도 12~22초 걸렸습니다. 요약 응답의 `meta.servedFrom`이 `built_on_demand`였고
 경고 "dashboard_cache sheet was missing"이 붙어 있었습니다. 숨김 시트 `dashboard_cache`가 없거나 비어서 요청마다 원본 13만 행으로
@@ -91,6 +137,8 @@ python3 build_index.py
 즉석본과 정상 캐시의 내용·순서 일치(품질 `sheetRow` 포함), 자동 점검 네 갈래, 이름만 같은 다른 시트 보호, doGet 응답.
 
 ## 2026-10-07 Apps Script v3.9 — 큰 읽기·쓰기를 Sheets 고급 서비스로
+
+주의(2026-11-05): 이 버전은 고급 서비스로 쓴 행을 앞서 모아 둔 `clear()`가 나중에 지워 `가공_데이터`·`dashboard_cache`가 빈 채로 남았습니다. v3.10.1에서 고쳤습니다.
 
 v3.8.1 전체 재생성 203초 중 **가공_데이터 전체 쓰기가 183초**였습니다(12만 행 × 17열을 2,000행씩 60번 `setValues`).
 Sheets 고급 서비스(`Sheets.Spreadsheets.Values.update/get`)는 같은 양을 2만~4만 행 단위 HTTP 요청으로 처리해 훨씬 빠릅니다.

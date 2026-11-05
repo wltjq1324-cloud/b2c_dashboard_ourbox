@@ -1,5 +1,5 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.10
+// 아워박스 MVP 대시보드 — Apps Script v3.10.1
 // ============================================================
 // 이 파일 전체를 Apps Script 편집기의 기존 v3.7 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
@@ -80,7 +80,7 @@
 //
 // v3.10 변경 (캐시가 사라져 느려지는 일 막기, 2026-11-05):
 //   - 원인: dashboard_cache 시트가 없거나 비면 웹 요청마다 13만 행으로 요약을 즉석 생성했습니다(12~22초).
-//     예전 쓰기는 시트를 먼저 비우고(clear) 썼기 때문에 쓰는 도중 멈추면 빈 캐시가 남을 수 있었습니다.
+//     v3.10 때는 쓰다 멈춘 탓으로 봤습니다. 운영 시트로 확인한 실제 원인은 아래 v3.10.1에 적었습니다.
 //   - 캐시 쓰기: 임시 시트(dashboard_cache_next)에 끝까지 쓰고 행 수를 확인한 뒤 바꿔 끼웁니다.
 //     쓰다가 멈춰도 쓰던 캐시는 그대로 남습니다. 바꿔 끼우는 잠깐 동안은 이전본(dashboard_cache_prev)을 읽습니다.
 //     지우는 시트는 이 두 이름 중 머리글이 캐시 형식(section/part/json)인 시트뿐입니다. 원본·가공·매핑 시트는 건드리지 않습니다.
@@ -92,6 +92,15 @@
 //     트리거는 편집기의 '트리거' 화면에서 사람이 한 번 추가합니다(코드로 만들면 새 권한이 필요해 웹앱이 멈출 수 있습니다).
 //   - 메뉴 '🩺 대시보드 캐시 점검': 자동 점검과 같은 일을 지금 한 번 합니다.
 //   - 새 서비스·권한 없음(SpreadsheetApp·CacheService·LockService·PropertiesService만).
+//
+// v3.10.1 변경 (시트가 빈 채로 남던 원인 고침, 2026-11-05):
+//   - 원인(운영 시트로 확인): v3.9부터 큰 쓰기를 Sheets 고급 서비스로 바로 보냅니다. 그 직전의 clear()와 머리글 쓰기는
+//     SpreadsheetApp이 모아 두었다가 나중에 반영해서, 고급 서비스로 방금 쓴 행을 뒤늦게 반영된 clear()가 지웠습니다.
+//     그래서 가공_데이터는 머리글 한 줄만, dashboard_cache는 빈 시트로 남았고, 갱신할 때마다
+//     '가공_데이터 행 수 불일치'로 전체 재생성을 되풀이했습니다. 원본 raw_orders는 건드리지 않았습니다.
+//   - 고침: 고급 서비스로 읽거나 쓰기 전에 SpreadsheetApp.flush()로 모아 둔 작업을 먼저 반영합니다(getValuesChunked_·setValuesChunked_).
+//   - 바꿔 끼우기: 값이 한 칸도 없는 dashboard_cache는 캐시 자리로 보고 바꿔 끼웁니다(v3.10은 여기서 멈췄습니다).
+//     값이 있는데 머리글이 다른 시트는 전처럼 건드리지 않습니다.
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -817,6 +826,8 @@ function getValuesChunked_(sheet, startRow, startCol, numRows, numCols, chunkRow
   if (numRows <= 0) return [];
 
   if (sheetsApiAvailable_()) {
+    // v3.10.1: 모아 둔 SpreadsheetApp 쓰기를 먼저 반영해야 고급 서비스가 최신 값을 읽습니다.
+    SpreadsheetApp.flush();
     try {
       var ssId = sheet.getParent().getId();
       var out = [];
@@ -854,6 +865,9 @@ function setValuesChunked_(sheet, startRow, startCol, values, chunkSize, flushEa
   if (!values || values.length === 0) return;
 
   if (sheetsApiAvailable_()) {
+    // v3.10.1: 이 시트에 걸린 clear()·머리글 쓰기를 먼저 반영합니다.
+    // 안 하면 고급 서비스로 쓴 행을 나중에 반영된 clear()가 지웁니다(v3.9~v3.10의 빈 시트 원인).
+    SpreadsheetApp.flush();
     try {
       var ssId = sheet.getParent().getId();
       for (var off = 0; off < values.length; off += API_WRITE_CHUNK_ROWS) {
@@ -916,7 +930,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.10'
+      version: 'v3.10.1'
     }
   };
 }
@@ -939,7 +953,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.10'
+      version: 'v3.10.1'
     }
   };
 }
@@ -1329,7 +1343,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.10',
+    version: 'v3.10.1',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -1469,7 +1483,8 @@ function writeDashboardCache_(ss, cache) {
   deleteCacheSheet_(ss, CACHE_SHEET_PREV);
   var current = ss.getSheetByName(CACHE_SHEET);
   if (current) {
-    if (!isCacheSheet_(current)) {
+    // 값이 한 칸도 없는 시트는 캐시 자리로 봅니다(v3.9가 비워 둔 운영 시트). 값이 있는데 머리글이 다르면 남의 시트라 멈춥니다.
+    if (current.getLastRow() > 0 && !isCacheSheet_(current)) {
       throw new Error('dashboard_cache 시트의 머리글이 캐시 형식이 아니어서 바꾸지 않았습니다. 이름이 같은 다른 시트가 있는지 확인하세요.');
     }
     current.setName(CACHE_SHEET_PREV);
