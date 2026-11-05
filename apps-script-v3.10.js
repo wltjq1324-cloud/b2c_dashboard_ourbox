@@ -1,5 +1,5 @@
 // ============================================================
-// 아워박스 MVP 대시보드 — Apps Script v3.9
+// 아워박스 MVP 대시보드 — Apps Script v3.10
 // ============================================================
 // 이 파일 전체를 Apps Script 편집기의 기존 v3.7 코드 위에 덮어쓰면 됩니다.
 // 배포: 저장만으로는 /exec에 반영되지 않습니다. 배포 관리 → 기존 배포 → 새 버전.
@@ -77,6 +77,21 @@
 //     getValuesChunked_ / setValuesChunked_ 가 Sheets.Spreadsheets.Values.get / update 를 씁니다.
 //     12만 행 × 17열 전체 쓰기 183초 → 수십 초 수준. 서비스가 없으면 기존 getRange 방식으로 자동 폴백합니다.
 //   - 첫 실행 때 스프레드시트 접근 권한 확인 창이 한 번 뜹니다.
+//
+// v3.10 변경 (캐시가 사라져 느려지는 일 막기, 2026-11-05):
+//   - 원인: dashboard_cache 시트가 없거나 비면 웹 요청마다 13만 행으로 요약을 즉석 생성했습니다(12~22초).
+//     예전 쓰기는 시트를 먼저 비우고(clear) 썼기 때문에 쓰는 도중 멈추면 빈 캐시가 남을 수 있었습니다.
+//   - 캐시 쓰기: 임시 시트(dashboard_cache_next)에 끝까지 쓰고 행 수를 확인한 뒤 바꿔 끼웁니다.
+//     쓰다가 멈춰도 쓰던 캐시는 그대로 남습니다. 바꿔 끼우는 잠깐 동안은 이전본(dashboard_cache_prev)을 읽습니다.
+//     지우는 시트는 이 두 이름 중 머리글이 캐시 형식(section/part/json)인 시트뿐입니다. 원본·가공·매핑 시트는 건드리지 않습니다.
+//   - 시트 읽기: 요청한 섹션 중 하나라도 없으면 깨진 캐시로 보고 즉석 생성으로 넘어갑니다(빈 배열로 내보내지 않습니다).
+//   - 즉석 생성: 만든 결과를 스크립트 캐시(6시간)에 넣어 다음 요청부터는 빠르게 답합니다. 시트는 쓰지 않습니다(잠금 없이 쓰지 않기).
+//     캐시 갱신과 같은 함수(readProcessedOrdersForCache_)로 읽어 내용이 캐시와 같습니다(v3.9까지는 품질 상세의 sheetRow가 빠졌습니다).
+//   - keepDashboardCacheWarm(): 1시간마다 도는 시간 트리거용. 스크립트 캐시가 살아 있으면 바로 끝나고,
+//     비었으면 시트로 다시 채우고, 시트가 없거나 깨졌으면 가공_데이터로 캐시를 다시 만듭니다.
+//     트리거는 편집기의 '트리거' 화면에서 사람이 한 번 추가합니다(코드로 만들면 새 권한이 필요해 웹앱이 멈출 수 있습니다).
+//   - 메뉴 '🩺 대시보드 캐시 점검': 자동 점검과 같은 일을 지금 한 번 합니다.
+//   - 새 서비스·권한 없음(SpreadsheetApp·CacheService·LockService·PropertiesService만).
 // ============================================================
 
 // 가공_데이터 행 수가 이 값을 넘으면 갱신 완료 메시지에 경고를 덧붙입니다.
@@ -103,6 +118,7 @@ function onOpen() {
     .addItem('🧹 가공_데이터 전체 재생성', 'refreshProcessedDataFull')
     .addItem('🧭 매핑 백로그 자동 채움', 'fillMappingBacklogMenu')
     .addItem('⚡ 대시보드 캐시만 갱신', 'refreshDashboardCacheMenu')
+    .addItem('🩺 대시보드 캐시 점검', 'keepDashboardCacheWarmMenu')
     .addItem('📋 테스트: 데이터 확인', 'testGetData')
     .addToUi();
 }
@@ -230,8 +246,8 @@ function refreshProcessedDataCore_(forceFull) {
 
   // 5. 증분이면 기존 가공_데이터가 필요합니다 (출고배송비 첫 행 판정 + 캐시 재생성 + 백로그 판정).
   //    12만 행 읽기는 비싸므로 **필요할 때만** 읽습니다. 새 행이 0건이고 캐시가 멀쩡하면 읽지 않습니다.
-  var cacheSheet = ss.getSheetByName('dashboard_cache');
-  var cacheMissing = !cacheSheet || cacheSheet.getLastRow() < 2;
+  // v3.10: 시트가 있어도 섹션이 빠졌으면(쓰다 멈춘 캐시) 없는 것으로 보고 이번 실행에서 다시 만듭니다.
+  var cacheMissing = !cacheSheetIsComplete_(ss);
   var seenOrders = {};
   var existingRows = [];
   var existingLoaded = false;
@@ -900,7 +916,7 @@ function readProcessedSheet(sheet) {
       source: '가공_데이터',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.9'
+      version: 'v3.10'
     }
   };
 }
@@ -923,7 +939,7 @@ function buildFromRawFallback(ss) {
       source: 'raw_orders+매핑(폴백)',
       rows: orders.length,
       timestamp: new Date().toISOString(),
-      version: 'v3.9'
+      version: 'v3.10'
     }
   };
 }
@@ -954,6 +970,13 @@ function getDashboardCache() {
 // 캐시 섹션 이름과 시트/스크립트 캐시에 저장되는 순서
 var CACHE_SECTIONS = ['meta', 'baseRows', 'productRows', 'qualityRows'];
 
+// 캐시 시트 이름. 새 캐시는 _next에 끝까지 쓴 뒤 바꿔 끼우고, 바꿔 끼우는 동안만 _prev가 잠깐 남습니다.
+var CACHE_SHEET = 'dashboard_cache';
+var CACHE_SHEET_NEXT = 'dashboard_cache_next';
+var CACHE_SHEET_PREV = 'dashboard_cache_prev';
+var CACHE_HEADER = ['section', 'part', 'json'];
+var CACHE_MISSING_WARNING = 'dashboard_cache missing or incomplete; built on demand. Run menu "대시보드 캐시만 갱신" or wait for keepDashboardCacheWarm (hourly)';
+
 // part → 응답에 실을 섹션. 알 수 없는 값은 전체 응답(구 대시보드 호환).
 function cacheSectionsForPart_(part) {
   if (part === 'summary') return ['meta', 'baseRows', 'productRows'];
@@ -972,20 +995,31 @@ function getDashboardCacheText_(part) {
 
   if (!texts) {
     servedFrom = 'sheet';
-    texts = readCacheTextsFromSheet_(sections);
+    try {
+      texts = readCacheTextsFromSheet_(sections);
+    } catch (err) {
+      // 바꿔 끼우는 순간 읽던 이전본이 지워지는 등 드문 경우. 오류 대신 즉석 생성으로 답합니다.
+      Logger.log('cache sheet read failed → build on demand: ' + err.message);
+      texts = null;
+    }
   }
 
   if (!texts) {
-    // dashboard_cache 시트가 없음 → 즉석 생성 (느림. refreshProcessedData 1회 실행이 정답)
+    // dashboard_cache 시트가 없거나 깨짐 → 즉석 생성(느림).
+    // 고치는 길: 메뉴 '⚡ 대시보드 캐시만 갱신' 또는 1시간마다 도는 keepDashboardCacheWarm 트리거.
     servedFrom = 'built_on_demand';
-    var processed = getProcessedData();
-    var built = buildDashboardCacheFromOrders_(processed.orders || []);
+    // 캐시 갱신과 같은 함수로 읽습니다. v3.9까지는 getProcessedData()로 읽어 품질 상세의 sheetRow가 빠졌습니다.
+    var built = buildDashboardCacheFromOrders_(readProcessedOrdersForCache_(SpreadsheetApp.getActiveSpreadsheet()));
     built.meta.source = 'built_on_demand';
-    built.meta.warning = 'dashboard_cache sheet was missing; run refreshProcessedData once';
-    texts = {};
-    for (var b = 0; b < sections.length; b++) {
-      texts[sections[b]] = JSON.stringify(built[sections[b]] || null);
+    built.meta.warning = CACHE_MISSING_WARNING;
+    var all = {};
+    for (var b = 0; b < CACHE_SECTIONS.length; b++) {
+      all[CACHE_SECTIONS[b]] = JSON.stringify(built[CACHE_SECTIONS[b]] || null);
     }
+    // 다음 요청부터는 스크립트 캐시에서 바로 답합니다(6시간). 시트는 잠금을 잡는 갱신 경로만 씁니다.
+    writeCacheTextsToScriptCache_(all);
+    texts = {};
+    for (var t = 0; t < sections.length; t++) texts[sections[t]] = all[sections[t]];
   }
 
   // meta만 작으니 파싱해서 서빙 정보를 덧붙입니다.
@@ -1087,10 +1121,20 @@ function writeCacheTextsToScriptCache_(texts) {
 }
 
 // ---------- 시트 읽기 (요청한 섹션의 행만) ----------
+// 읽을 캐시 시트: 평소에는 dashboard_cache, 바꿔 끼우는 잠깐 동안에는 직전본(_prev).
+function cacheSheetForRead_(ss) {
+  var names = [CACHE_SHEET, CACHE_SHEET_PREV];
+  for (var i = 0; i < names.length; i++) {
+    var sheet = ss.getSheetByName(names[i]);
+    if (sheet && sheet.getLastRow() >= 2) return sheet;
+  }
+  return null;
+}
+
 function readCacheTextsFromSheet_(sections) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('dashboard_cache');
-  if (!sheet || sheet.getLastRow() < 2) return null;
+  var sheet = cacheSheetForRead_(ss);
+  if (!sheet) return null;
 
   var lastRow = sheet.getLastRow();
   // A:B(section, part)만 먼저 읽습니다. json 열은 필요한 행 범위만 읽습니다.
@@ -1109,7 +1153,8 @@ function readCacheTextsFromSheet_(sections) {
   var filled = {};
   for (var s = 0; s < sections.length; s++) {
     var range = wanted[sections[s]];
-    if (range.first < 0) { texts[sections[s]] = ''; continue; }
+    // 요청한 섹션이 시트에 없으면 깨진 캐시입니다. 빈 배열로 내보내지 않고 즉석 생성으로 넘깁니다.
+    if (range.first < 0) return null;
     var rows = sheet.getRange(range.first + 2, 1, range.last - range.first + 1, 3).getValues();
     var pieces = [];
     for (var r = 0; r < rows.length; r++) {
@@ -1284,7 +1329,7 @@ function buildDashboardCacheFromOrders_(orders) {
   var productRows = finalizeAgg_(productMap);
   var meta = {
     source: 'dashboard_cache',
-    version: 'v3.9',
+    version: 'v3.10',
     generatedAt: new Date().toISOString(),
     rawRows: orders.length,
     baseRows: baseRows.length,
@@ -1385,39 +1430,139 @@ function compactQualityRow_(order, issues) {
 }
 
 function writeDashboardCache_(ss, cache) {
-  var sheet = ss.getSheetByName('dashboard_cache');
-  if (!sheet) sheet = ss.insertSheet('dashboard_cache');
-  if (sheet.getFilter()) sheet.getFilter().remove();
-  sheet.clear();
-
   var texts = {};
-  var rows = [['section', 'part', 'json']];
+  var rows = [CACHE_HEADER.slice()];
   for (var s = 0; s < CACHE_SECTIONS.length; s++) {
     var name = CACHE_SECTIONS[s];
     texts[name] = JSON.stringify(cache[name] || null);
     appendJsonChunks_(rows, name, texts[name]);
   }
 
-  setValuesChunked_(sheet, 1, 1, rows, 1000);
-  sheet.getRange(1, 1, 1, 3)
+  // 메뉴로 돌릴 때 보던 탭이 캐시 시트로 넘어가지 않게 돌려놓습니다.
+  var active = null;
+  try { active = ss.getActiveSheet(); } catch (err) { active = null; }
+
+  // 1) 지난번에 쓰다 멈춘 임시 시트를 치우고 새 임시 시트에 끝까지 씁니다.
+  //    여기서 멈춰도 지금 쓰는 dashboard_cache는 그대로입니다.
+  deleteCacheSheet_(ss, CACHE_SHEET_NEXT);
+  var next = ss.insertSheet(CACHE_SHEET_NEXT, ss.getNumSheets());
+  try { next.hideSheet(); } catch (err) { /* 숨김 실패는 기능에 영향 없음 */ }
+  setValuesChunked_(next, 1, 1, rows, 1000);
+  next.getRange(1, 1, 1, 3)
     .setFontWeight('bold')
     .setBackground('#1F2937')
     .setFontColor('#FFFFFF');
+  // autoResizeColumns는 json 열(셀당 최대 45,000자)의 폭을 측정하느라 수 분이 걸려 고정 폭을 씁니다.
+  next.setColumnWidth(1, 120);
+  next.setColumnWidth(2, 60);
+  next.setColumnWidth(3, 400);
+  SpreadsheetApp.flush();
 
-  // autoResizeColumns는 json 열(셀당 최대 45,000자)의 폭을 측정하느라
-  // 수 분이 걸리므로 사용하지 않고 고정 폭을 지정합니다.
-  sheet.setColumnWidth(1, 120);
-  sheet.setColumnWidth(2, 60);
-  sheet.setColumnWidth(3, 400);
+  // 2) 다 써졌는지 행 수로 확인합니다. 모자라면 바꿔 끼우지 않고 실패로 알립니다(기존 캐시 유지).
+  var written = next.getLastRow();
+  if (written !== rows.length) {
+    throw new Error('캐시 쓰기 확인 실패: ' + written + '/' + rows.length + '행. 기존 캐시는 그대로입니다.');
+  }
 
-  try {
-    sheet.hideSheet();
-  } catch (err) {
-    // 숨김 실패는 대시보드 기능에 영향이 없어 무시합니다.
+  // 3) 바꿔 끼우기: 지금 것 → _prev, 새 것 → dashboard_cache, _prev 삭제.
+  //    두 이름 바꾸기 사이의 잠깐 동안 읽는 쪽은 _prev(직전 완전본)를 읽습니다.
+  deleteCacheSheet_(ss, CACHE_SHEET_PREV);
+  var current = ss.getSheetByName(CACHE_SHEET);
+  if (current) {
+    if (!isCacheSheet_(current)) {
+      throw new Error('dashboard_cache 시트의 머리글이 캐시 형식이 아니어서 바꾸지 않았습니다. 이름이 같은 다른 시트가 있는지 확인하세요.');
+    }
+    current.setName(CACHE_SHEET_PREV);
+  }
+  next.setName(CACHE_SHEET);
+  deleteCacheSheet_(ss, CACHE_SHEET_PREV);
+
+  if (active) {
+    try { if (!active.isSheetHidden()) ss.setActiveSheet(active); } catch (err) { /* 무시 */ }
   }
 
   // 웹 요청이 시트 대신 바로 읽도록 스크립트 캐시도 같은 내용으로 갱신합니다.
   writeCacheTextsToScriptCache_(texts);
+}
+
+// 머리글이 section/part/json인 시트만 캐시 시트로 봅니다(이름이 같은 다른 시트를 지우지 않게).
+function isCacheSheet_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < 3) return false;
+  var head = sheet.getRange(1, 1, 1, 3).getValues()[0];
+  for (var i = 0; i < CACHE_HEADER.length; i++) {
+    if (String(head[i] || '').trim() !== CACHE_HEADER[i]) return false;
+  }
+  return true;
+}
+
+// 캐시용 임시·이전본 시트만 지웁니다. 비어 있는 임시 시트(쓰기 전에 멈춤)도 지웁니다.
+function deleteCacheSheet_(ss, name) {
+  if (name !== CACHE_SHEET_NEXT && name !== CACHE_SHEET_PREV) return;
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) return;
+  if (sheet.getLastRow() === 0 || isCacheSheet_(sheet)) {
+    ss.deleteSheet(sheet);
+    return;
+  }
+  throw new Error(name + ' 시트가 캐시 형식이 아니어서 지우지 않았습니다. 이름을 바꿔 주세요.');
+}
+
+// ---------- 자동 점검 (시간 트리거용, 1시간마다 권장) ----------
+// 스크립트 캐시가 살아 있으면 바로 끝납니다(1초 안). 비었으면 시트로 다시 채우고,
+// 시트가 없거나 깨졌으면 가공_데이터로 캐시를 다시 만듭니다. 결과는 실행 로그와 문서 속성에 남습니다.
+var CACHE_KEEPER_STATE_KEY = 'OURBOX_CACHE_KEEPER_LAST';
+
+function keepDashboardCacheWarm() {
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(1000)) {
+    return recordKeeper_('skip', '다른 갱신이 진행 중이라 이번 점검은 건너뜀');
+  }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    // 1) 시트가 온전한지 먼저 봅니다. 즉석 생성이 스크립트 캐시를 채워 둬도 시트가 없으면 6시간 뒤 다시 느려지기 때문입니다.
+    if (!cacheSheetIsComplete_(ss)) {
+      var stats = refreshDashboardCache(ss);
+      return recordKeeper_('rebuilt', '캐시 시트가 없거나 깨져 다시 만듦 · 원본 ' + stats.rawRows + '건 · ' + stats.timingText);
+    }
+    // 2) 시트는 온전하고 스크립트 캐시도 있으면 할 일이 없습니다.
+    if (readCacheTextsFromScriptCache_(['meta'])) {
+      return recordKeeper_('ok', '시트·스크립트 캐시 모두 있음');
+    }
+    // 3) 스크립트 캐시만 만료됐으면 시트로 다시 채웁니다(readCacheTextsFromSheet_가 채움).
+    readCacheTextsFromSheet_(CACHE_SECTIONS);
+    return recordKeeper_('warmed', '시트에서 스크립트 캐시를 다시 채움');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// dashboard_cache 시트가 캐시 형식이고 네 섹션이 모두 있는지(섹션 이름 열만 읽어 1초 안).
+function cacheSheetIsComplete_(ss) {
+  var sheet = ss.getSheetByName(CACHE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2 || !isCacheSheet_(sheet)) return false;
+  var names = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  var seen = {};
+  for (var i = 0; i < names.length; i++) seen[String(names[i][0] || '').trim()] = true;
+  for (var s = 0; s < CACHE_SECTIONS.length; s++) {
+    if (!seen[CACHE_SECTIONS[s]]) return false;
+  }
+  return true;
+}
+
+function keepDashboardCacheWarmMenu() {
+  notifyUser_('🩺 대시보드 캐시 점검\n\n' + keepDashboardCacheWarm());
+}
+
+function recordKeeper_(result, detail) {
+  var line = result + ' · ' + detail;
+  Logger.log('dashboard cache keeper: ' + line);
+  try {
+    PropertiesService.getDocumentProperties().setProperty(CACHE_KEEPER_STATE_KEY,
+      JSON.stringify({ at: new Date().toISOString(), result: result, detail: detail }));
+  } catch (err) {
+    // 기록 실패는 점검 결과에 영향이 없습니다.
+  }
+  return line;
 }
 
 function appendJsonChunks_(rows, section, text) {
