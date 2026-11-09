@@ -12,6 +12,7 @@
 - 데이터 원본: Google Sheets `raw_orders`, `가공_데이터`, `map_channel`, `map_product`, `map_cost`
 - Apps Script 현재 기준: **v3.10.1** — `apps-script-v3.10.1.js` (전체 파일. 편집기 코드 위에 그대로 덮어쓰기)
 - 캐시 경로 모의 시험: `node --test test/*.test.mjs` (Node 20+, 설치할 것 없음)
+- 채널 멀티선택 브라우저 시험: `node test/channel-multi.e2e.mjs` (Playwright 필요 · 없으면 SKIP으로 끝남)
 
 ## Apps Script 자동 배포 (GitHub Actions + clasp)
 
@@ -56,6 +57,25 @@ python3 build_index.py
 ```
 
 운영 배포 파일은 보호 대상입니다. 검증은 `dashboard.src.html`을 로컬에서 열어 먼저 합니다.
+
+## 2026-11-09 대시보드 — 채널 멀티선택 (a+b+c 합산 조회)
+
+채널을 하나만 고를 수 있던 필터를 여러 채널 합산 조회로 바꿨습니다. 코드는 `dashboard.src.html`의 `CHANNEL_SEL`·`chMatch`·`toggleChannel` 주변입니다.
+
+| 조작 | 동작 |
+|---|---|
+| 채널 행 클릭(목표 기여도 막대 · 수익 구조 표 2개) | 그 채널을 선택에 **추가/해제**(토글). 마지막 하나를 해제하면 전체 |
+| 채널그룹 드롭다운 | **단일 교체**(전체 포함). 2개 이상 선택 중엔 'N개 채널 합산'으로 표시 |
+| 상단 칩 `채널: ○○ ✕` | 그 채널만 해제. 2개 이상이면 `전체 해제` 칩도 생김 |
+| 필터 초기화 | 채널 선택 비움 |
+
+- KPI·차트·전월 동기간 비교·상품·품질 상세는 **선택 채널의 합**으로 집계합니다(비어 있으면 전체). 기존 필터 함수 5개가 `chMatch(r)` 하나를 공유합니다.
+- 채널 목록 패널 3곳은 채널 필터와 무관하게 범위 내 **모든 채널**을 보여 줍니다(그래야 a 다음 b를 더 누를 수 있음). 선택 채널은 파란 배경, 나머지는 흐리게. 수익 구조 표의 합계 행은 '합계 (선택 N개 채널)'로 선택분만 더합니다.
+- 기간·상품군·담당자를 바꿔 범위에서 사라진 채널은 선택에서 자동으로 빠집니다(단일 선택 때 '전체'로 돌아가던 기존 동작과 같음).
+
+검증: `node test/channel-multi.e2e.mjs` — Chromium에 `dashboard.src.html`을 띄우고 Apps Script 응답을 가짜 데이터(채널 3개·5일)로 대체한 뒤
+행 클릭/칩/드롭다운/초기화/담당자 페이지 전환 11개 시나리오의 KPI 합계와 선택 상태를 대조하고, 페이지 오류·콘솔 error 0건을 확인합니다.
+Playwright가 필요합니다(`npm i -D playwright && npx playwright install chromium`). 기존 `node --test test/*.test.mjs`(9개)도 그대로 통과합니다.
 
 ## 2026-11-05 Apps Script v3.10.1 — 시트가 빈 채로 남던 원인 고침
 
