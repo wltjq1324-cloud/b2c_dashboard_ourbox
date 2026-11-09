@@ -5,7 +5,8 @@
 # 1회 설정(README '자동 배포' 절 참조):
 #   - 시크릿 CLASPRC_JSON : 로컬 `clasp login` 뒤 생기는 ~/.clasprc.json 내용 전체 (필수)
 #   - .clasp.json 의 scriptId: Apps Script 프로젝트 설정 → 스크립트 ID (필수)
-#   - 시크릿 DEPLOYMENT_ID : 웹앱 배포가 2개 이상일 때만. 1개면 자동으로 찾습니다.
+#   - 시크릿 DEPLOYMENT_ID : 보통 불필요. dashboard.src.html의 OURBOX_API_URL(/exec)에서 배포 ID를 읽고,
+#                            그게 없으면 버전 있는 웹앱 배포가 1개일 때 자동 선택. 둘 다 아닐 때만 시크릿으로 지정.
 #   - appsscript.json 은 라이브 프로젝트에서 clasp pull 로 받아 쓰므로 대조할 필요 없습니다.
 name: Deploy Apps Script
 
@@ -115,6 +116,14 @@ jobs:
           cat deployments.json
           # versionNumber가 없는 항목은 @HEAD(편집기 테스트 배포)라 제외
           IDS=$(python3 -c "import json;print('\n'.join(d['deploymentId'] for d in json.load(open('deployments.json')) if d.get('versionNumber')))")
+          # 1순위: 대시보드가 실제로 호출하는 /exec URL의 배포 ID (dashboard.src.html의 window.OURBOX_API_URL).
+          # 공개 HTML에 그대로 들어 있는 값이라 비밀이 아니며, 이 배포에 새 버전을 올려야 대시보드에 반영됩니다.
+          FROM_SRC=$(sed -n 's#.*script\.google\.com/macros/s/\([A-Za-z0-9_-]\{20,\}\)/exec.*#\1#p' dashboard.src.html | head -1 || true)
+          if [ -n "$FROM_SRC" ] && echo "$IDS" | grep -qx "$FROM_SRC"; then
+            echo "id=$FROM_SRC" >> "$GITHUB_OUTPUT"; echo "dashboard.src.html의 OURBOX_API_URL 배포 ID 사용: $FROM_SRC"; exit 0
+          fi
+          [ -n "$FROM_SRC" ] && echo "::warning::dashboard.src.html의 배포 ID($FROM_SRC)가 이 스크립트의 배포 목록에 없습니다. .clasp.json의 scriptId가 대시보드 시트의 Apps Script가 맞는지 확인하세요."
+          # 2순위: 버전이 있는 웹앱 배포가 하나뿐이면 그것
           COUNT=$(echo "$IDS" | grep -c . || true)
           if [ "$COUNT" -eq 1 ]; then
             echo "id=$IDS" >> "$GITHUB_OUTPUT"; echo "웹앱 배포 1개 자동 선택: $IDS"
