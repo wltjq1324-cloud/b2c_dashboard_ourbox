@@ -25,10 +25,12 @@
 2. **clasp 로그인 토큰 → GitHub 시크릿**: 내 PC 터미널에서
    ```bash
    npm i -g @google/clasp@3
-   clasp login          # 브라우저가 열리면 시트 소유 계정으로 로그인
-   type %USERPROFILE%\.clasprc.json     # Mac: cat ~/.clasprc.json
+   clasp login          # 브라우저가 열리면 시트 소유 계정으로 로그인 → "Logged in!" 확인
+   notepad $env:USERPROFILE\.clasprc.json   # PowerShell·cmd 공통. Mac: open -e ~/.clasprc.json
    ```
-   출력된 JSON 전체를 GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret → 이름 `CLASPRC_JSON`.
+   (cmd 전용 `type %USERPROFILE%\.clasprc.json`은 PowerShell에서 `%USERPROFILE%`가 안 풀려 빈 결과가 나옵니다.)
+   메모장에 뜬 JSON 전체(Ctrl+A, Ctrl+C)를 GitHub 저장소 `b2c_dashboard_ourbox` → Settings → Secrets and variables → **Actions** 탭 →
+   **Repository secrets** → New repository secret → 이름 `CLASPRC_JSON`. (Environment/Dependabot/Codespaces 탭이나 Variables 탭에 넣으면 워크플로가 못 읽습니다.)
 3. **스크립트 ID**: `.clasp.json`의 `scriptId`에 **이미 들어 있습니다** (대시보드 시트 `1C3gJ1gC…`에 바인딩된 Apps Script, 2026-11-09 확인).
    다른 프로젝트로 옮길 때만 편집기 → ⚙️ 프로젝트 설정 → "스크립트 ID"로 바꿉니다. (비밀 값이 아닙니다.)
 
