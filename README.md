@@ -29,11 +29,12 @@
    type %USERPROFILE%\.clasprc.json     # Mac: cat ~/.clasprc.json
    ```
    출력된 JSON 전체를 GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret → 이름 `CLASPRC_JSON`.
-3. **스크립트 ID**: Apps Script 편집기 → ⚙️ 프로젝트 설정 → "스크립트 ID" → 이 저장소 `.clasp.json`의 `scriptId`에 넣고 커밋.
-   (이 값은 비밀이 아닙니다. 채팅으로 전달해 커밋을 맡겨도 됩니다.)
+3. **스크립트 ID**: `.clasp.json`의 `scriptId`에 **이미 들어 있습니다** (대시보드 시트 `1C3gJ1gC…`에 바인딩된 Apps Script, 2026-11-09 확인).
+   다른 프로젝트로 옮길 때만 편집기 → ⚙️ 프로젝트 설정 → "스크립트 ID"로 바꿉니다. (비밀 값이 아닙니다.)
 
 그 밖의 것은 워크플로가 알아서 합니다: 매니페스트(`appsscript.json`)는 라이브 프로젝트에서 `clasp pull`로 받아 그대로 쓰고,
-웹앱 배포 ID는 `clasp deployments`로 찾습니다. 웹앱 배포가 2개 이상일 때만 시크릿 `DEPLOYMENT_ID`가 필요합니다.
+웹앱 배포 ID는 `dashboard.src.html`의 `OURBOX_API_URL`(/exec 주소)에서 읽어 **대시보드가 실제로 호출하는 배포**에 새 버전을 올립니다.
+그 값이 스크립트의 배포 목록에 없으면 버전 있는 웹앱 배포가 1개일 때 자동 선택하고, 둘 다 아닐 때만 시크릿 `DEPLOYMENT_ID`가 필요합니다.
 
 설정 뒤 첫 확인: Actions 탭에서 "Deploy Apps Script" 워크플로를 `Run workflow`로 수동 실행 → 녹색이면 Apps Script 배포 관리에 새 버전이 생기고,
 대시보드 F12 콘솔 `[ourbox] summary` 로그의 `meta.version`이 새 버전으로 바뀝니다.
@@ -57,6 +58,21 @@ python3 build_index.py
 ```
 
 운영 배포 파일은 보호 대상입니다. 검증은 `dashboard.src.html`을 로컬에서 열어 먼저 합니다.
+
+## 2026-11-09 Apps Script 자동 배포 — 남은 1회 설정은 시크릿 하나
+
+"Deploy Apps Script" 워크플로가 #16·#17·#18 머지마다 빨간색이던 이유는 코드 문제가 아니라 `Check secrets` 단계에서
+`CLASPRC_JSON` 시크릿과 `.clasp.json`의 `scriptId`가 둘 다 비어 있었기 때문입니다(실행 로그 확인). 이번에 정리한 것:
+
+- `.clasp.json`의 `scriptId`를 채움 — Drive에서 대시보드 시트의 Apps Script 프로젝트를 찾아 내용(`refreshProcessedData`·`dashboard_cache`·v3.10.1)으로 확인.
+  라이브 편집기 `Code.gs`는 레포 `apps-script-v3.10.1.js`와 동일해서(공백 제외) 자동 배포가 덮어써도 잃는 코드가 없습니다.
+- `appsscript.json`에 라이브 매니페스트와 같은 **Sheets 고급 서비스(v4)** 설정을 추가. 워크플로는 라이브 매니페스트를 `clasp pull`로 우선 쓰지만,
+  그게 실패해 레포 것으로 폴백할 때 고급 서비스가 빠지면 v3.9+의 `Sheets.*` 호출이 깨지므로 맞춰 둠.
+- 배포 ID 결정 순서를 바꿈: 시크릿 `DEPLOYMENT_ID` → **`dashboard.src.html`의 `OURBOX_API_URL`(/exec)에서 읽은 배포 ID**(대시보드가 실제로 호출하는 배포) →
+  버전 있는 웹앱 배포가 1개면 그것. 시크릿 `DEPLOYMENT_ID`는 사실상 필요 없어짐.
+
+**남은 것(계정 소유자만 가능)**: 위 '1회 설정' 2번 — 내 PC에서 `clasp login` 뒤 `~/.clasprc.json` 내용을 GitHub 시크릿 `CLASPRC_JSON`으로 등록.
+그 전까지는 머지 때마다 워크플로가 빨간색으로 "CLASPRC_JSON 비어 있음"을 남기고 건너뜁니다(동작엔 영향 없음). 등록 후 Actions → "Deploy Apps Script" → Run workflow로 첫 배포를 확인합니다.
 
 ## 2026-11-09 대시보드 — 채널 멀티선택 (a+b+c 합산 조회)
 
