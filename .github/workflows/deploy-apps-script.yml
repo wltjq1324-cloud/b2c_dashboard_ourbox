@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Pick newest apps-script-v*.js
         id: pick
@@ -68,9 +68,9 @@ jobs:
           PY
           ls -la build
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install clasp
         # 사용자 PC의 clasp login 결과(~/.clasprc.json, tokens.default 형식)와 같은 메이저 버전이어야 읽힙니다.
